@@ -1,6 +1,6 @@
-{#- Neighbour Match  ·  /match?unit=T2S&as=T2S-O001  ·  rendered by dashboard.match()
-    A community page for one home type. "Browsing as" picks which (simulated)
-    neighbour you are. The composer posts an offer (POST /api/match/list) or a
+{#- Neighbour Match  ·  /match?unit=T2S  ·  rendered by dashboard.match()
+    A community page for one home type, as the neighbour signed in (demo
+    sign-in), or a sample neighbour; "Switch neighbour" signs in as someone else. The composer posts an offer (POST /api/match/list) or a
     request (/api/match/request); neighbour_match.py pairs the nearest home of the
     same type at once. The feed (community.feed) shows every post with its chat:
     "I'd like this" (/api/match/claim), "I have one" (/api/match/list with
@@ -67,18 +67,24 @@
 
   <div class="you-bar">
     {{ avatar(you.person) }}
-    <p>Browsing as <b>{{ you.person.name }}</b><span>{{ you.person.home }} · {{ you.person.role }}</span></p>
-    <label for="as" class="you-switch">Switch neighbour
-      <select id="as">
-        {% for role, title in (('Homeowner', 'Homeowners'), ('Moving in', 'Moving in (new buyers)')) %}
-          <optgroup label="{{ title }}">
-            {% for n in neighbours if n.role == role %}
-              <option value="{{ n.id }}" {{ 'selected' if n.id == you.person.id }}>{{ n.name }} · {{ n.home }}</option>
-            {% endfor %}
-          </optgroup>
-        {% endfor %}
-      </select>
-    </label>
+    <p>{{ 'Signed in as' if you_signed_in else 'Showing the page as a sample neighbour,' }} <b>{{ you.person.name }}</b>
+      <span>{{ you.person.home }} · {{ you.person.role }}</span></p>
+    {# Switching signs you in as that neighbour (demo sign-in, no password) and comes back here. #}
+    <form method="post" action="{{ url_for('dashboard.signin_post') }}" id="switch-form">
+      <input type="hidden" name="next" value="{{ url_for('dashboard.match', unit=unit) }}">
+      <label for="as" class="you-switch">Switch neighbour
+        <select id="as" name="who">
+          {% for role, title in (('Homeowner', 'Homeowners'), ('Moving in', 'Moving in (new buyers)')) %}
+            <optgroup label="{{ title }}">
+              {% for n in neighbours if n.role == role %}
+                <option value="{{ n.id }}" {{ 'selected' if n.id == you.person.id }}>{{ n.name }} · {{ n.home }}</option>
+              {% endfor %}
+            </optgroup>
+          {% endfor %}
+        </select>
+      </label>
+      <noscript><button type="submit" class="dl">Switch</button></noscript>
+    </form>
   </div>
 
   <section class="results" aria-labelledby="sum-title">
@@ -378,7 +384,7 @@
     try { await step(); } catch (err) { btn.disabled = false; showError(form, err.message); }
   }
 
-  document.getElementById('as').addEventListener('change', e => reloadOn(null, null, e.target.value));
+  document.getElementById('as').addEventListener('change', () => document.getElementById('switch-form').submit());
 
   // ---- composer ----
   const tabs = [...document.querySelectorAll('.post-tabs [role=tab]')];
