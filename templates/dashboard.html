@@ -107,7 +107,7 @@
       <div class="kpi">
         <div class="label">Rehomed next door</div>
         <div class="value">{{ '{:.0f}'.format(totals.reuse.reuse_rate * 100) }}<small>%</small></div>
-        <div class="note">{{ totals.reuse.collected }} of {{ totals.reuse.listed }} removed fittings went to a neighbour</div>
+        <div class="note">{{ totals.reuse.collected }} of the {{ totals.reuse.listed }} fittings owners listed on Neighbour Match</div>
       </div>
     </div>
     <div class="results-foot">
@@ -242,13 +242,28 @@
     <h2 id="method-title">How we worked it out</h2>
     <ul>
       <li>Carbon per fitting = its weight × a carbon factor for its material. The factors come from the ICE database (v4), e.g. particleboard 0.664 kg CO₂e per kg; prices are the low end of Malaysian retail prices.</li>
-      <li>We only count carbon for fittings the buyer would have ripped out anyway, which is why only frequently removed items are offered.</li>
+      <li>Carbon (and material) only counts where at least {{ '{:.0f}'.format(offer * 100) }}% of owners remove that fitting. Below that we can't say the buyer would have ripped it out, so their choice saves money but counts no carbon.</li>
       <li>SDP's saving = installation it no longer pays for, minus the credit it gives the buyer. Upgrade income = SDP's margin on each upgrade.</li>
       <li>Reused fittings count their carbon, minus the delivery trip ({{ transport }} kg CO₂e per km, both ways).</li>
       <li>Advice: removed by {{ '{:.0f}'.format(stop * 100) }}% or more of owners → stop installing; {{ '{:.0f}'.format(offer * 100) }}–{{ '{:.0f}'.format(stop * 100) }}% → offer as an opt-out (or as an upgrade, for items like tiles that can't be left out); fewer → keep.</li>
     </ul>
+    <p class="reset-row">
+      <button type="button" class="btn-link dark" id="reset-demo">Reset demo data</button>
+      <span class="hint">Puts every data file back to the starting demo data, removing reports, choices and
+        Neighbour Match listings added while practising. Do this before the real demo.</span>
+    </p>
   </section>
 </div>
+<script>
+  // Before a demo: back to the same starting data every time (POST /api/reset-demo).
+  document.getElementById('reset-demo').addEventListener('click', async e => {
+    if (!confirm('Reset all demo data? Reports, choices, Neighbour Match posts and messages added while practising will be removed.')) return;
+    e.target.disabled = true;
+    const res = await fetch('/api/reset-demo', { method: 'POST' });
+    if (res.ok) location.reload();
+    else { e.target.disabled = false; alert('Could not reset the demo data.'); }
+  });
+</script>
 
 <script type="importmap">
   {"imports": {
