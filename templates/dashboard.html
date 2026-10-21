@@ -259,7 +259,7 @@
   document.getElementById('reset-demo').addEventListener('click', async e => {
     if (!confirm('Reset all demo data? Reports, choices, Neighbour Match posts and messages added while practising will be removed.')) return;
     e.target.disabled = true;
-    const res = await fetch('/api/reset-demo', { method: 'POST' });
+    const res = await fetch('/api/reset-demo', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
     if (res.ok) location.reload();
     else { e.target.disabled = false; alert('Could not reset the demo data.'); }
   });
