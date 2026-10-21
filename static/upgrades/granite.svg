@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 100">
+  <!-- Granite top: polished speckled natural stone. Illustration, not a product photo. -->
+  <defs>
+    <pattern id="speck" width="12" height="9" patternUnits="userSpaceOnUse" patternTransform="scale(.45)">
+      <rect width="12" height="9" fill="#7d766d"/>
+      <circle cx="1.5" cy="2" r="1.2" fill="#2f2b28"/><circle cx="6" cy="1.2" r=".8" fill="#d9d2c6"/>
+      <circle cx="9.5" cy="3.4" r="1.1" fill="#3b3632"/><circle cx="4" cy="5.6" r=".9" fill="#b49a80"/>
+      <circle cx="8" cy="7" r="1.3" fill="#2a2724"/><circle cx="11" cy="7.8" r=".6" fill="#e6dfd4"/>
+      <circle cx="2.4" cy="8" r=".7" fill="#9b8c7c"/><circle cx="6.8" cy="4.2" r=".5" fill="#efe9de"/>
+    </pattern>
+    <linearGradient id="shine" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#fff" stop-opacity="0"/><stop offset=".5" stop-color="#fff" stop-opacity=".28"/><stop offset="1" stop-color="#fff" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+  <rect width="160" height="100" fill="#f2ece2"/>
+  <rect x="18" y="8" width="124" height="22" fill="#e9e2d5"/>
+  <path d="M98 31V18q0-6 6-6t6 6v4" fill="none" stroke="#98a0a6" stroke-width="2.2" stroke-linecap="round"/>
+  <rect x="94" y="29" width="8" height="3" rx="1" fill="#98a0a6"/>
+  <!-- worktop surface, polished -->
+  <path d="M24 30h112l18 26H6z" fill="url(#speck)"/>
+  <path d="M46 30h22L50 56H24z" fill="url(#shine)"/>
+  <ellipse cx="102" cy="42.5" rx="21" ry="6.5" fill="#d3d7d9"/>
+  <ellipse cx="102" cy="43.6" rx="18" ry="4.8" fill="#bcc2c5"/>
+  <circle cx="104" cy="44.5" r="1.3" fill="#8f979c"/>
+  <!-- edge -->
+  <rect x="6" y="56" width="148" height="5" fill="url(#speck)"/>
+  <rect x="6" y="56" width="148" height="5" fill="#000" fill-opacity=".18"/>
+  <rect x="8" y="61" width="144" height="39" fill="#e6e0d5"/>
+  <path d="M56 61v39M104 61v39" stroke="#cfc7b9" stroke-width="1"/>
+  <rect x="51" y="65" width="1.6" height="7" rx=".8" fill="#6b6359"/>
+  <rect x="59.5" y="65" width="1.6" height="7" rx=".8" fill="#6b6359"/>
+  <rect x="107.5" y="65" width="1.6" height="7" rx=".8" fill="#6b6359"/>
+</svg>
