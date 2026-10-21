@@ -1,0 +1,212 @@
+{#- Neighbour Match  ·  /match?unit=T2S  ·  rendered by dashboard.match()
+    Draws the township map (positions from match_map.py) and animates each listing
+    from the owner who removed a fitting to the neighbour who took it. The KPIs come
+    from impact.reuse_summary(), the same figures as the dashboard. -#}
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Right-Fit Homes · Neighbour Match</title>
+  <link rel="preload" href="{{ url_for('static', filename='fonts/fraunces.woff2') }}" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="{{ url_for('static', filename='fonts/figtree.woff2') }}" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
+</head>
+<body style="{{ advice_css }}">
+{% macro kg(v) -%}
+  {%- if v >= 1000 -%}{{ '{:,.1f}'.format(v / 1000) }} <small>t</small>{%- else -%}{{ '{:,.0f}'.format(v) }} <small>kg</small>{%- endif -%}
+{%- endmacro %}
+<div class="wrap">
+  {% set page = 'match' %}{% include '_topbar.html' %}
+
+  <header class="page-head">
+    <div>
+      <p class="kicker">Neighbour Match · {{ unit_types[unit] }}</p>
+      <h1 class="headline">A removed wardrobe <em>fits next door exactly.</em></h1>
+      <p class="standfirst">When an owner still rips a fitting out, we offer it to a nearby owner of the
+        <b>same home type</b>. Same design means same size, so it fits with no measuring.</p>
+      <span class="sim-badge" title="Simulated listings on a fictional township map."><i aria-hidden="true">!</i>Simulated data · fictional map</span>
+    </div>
+    <div class="unit-picker">
+      <span class="label" id="unit-label">Home type</span>
+      <nav class="tabs" aria-labelledby="unit-label">
+        {% for code, label in unit_types.items() %}
+          <a href="?unit={{ code }}" class="{{ 'on' if code == unit else '' }}"
+             {% if code == unit %}aria-current="page"{% endif %}>{{ label }}</a>
+        {% endfor %}
+      </nav>
+    </div>
+  </header>
+
+  <section class="results" aria-labelledby="sum-title">
+    <div class="results-head">
+      <h2 id="sum-title">Rehomed so far</h2>
+      <p>{{ summary.listed }} fittings listed by owners of this home type</p>
+    </div>
+    <div class="kpis four">
+      <div class="kpi"><div class="label">Delivered to a neighbour</div>
+        <div class="value">{{ summary.collected }} <small>of {{ summary.listed }}</small></div>
+        <div class="note">{{ summary.matched }} on the way, {{ summary.waiting }} waiting for a match</div></div>
+      <div class="kpi"><div class="label">Material reused</div><div class="value">{{ kg(summary.reused_kg) }}</div>
+        <div class="note">Fittings that would have gone to a skip</div></div>
+      <div class="kpi"><div class="label">Carbon saved</div><div class="value">{{ kg(summary.carbon_kg) }} <small>CO₂e</small></div>
+        <div class="note">After the delivery trips</div></div>
+      <div class="kpi"><div class="label">Average trip</div><div class="value">{{ '{:.1f}'.format(summary.avg_km) }} <small>km</small></div>
+        <div class="note">Matches stay close to keep transport low</div></div>
+    </div>
+  </section>
+
+  <div class="map-grid">
+    <section class="panel map-panel" aria-labelledby="map-title">
+      <div class="panel-head">
+        <div>
+          <h3 id="map-title">The township</h3>
+          <p class="lead">Click a route or a listing. Positions are illustrative.</p>
+        </div>
+        <button type="button" class="dl" id="play" aria-pressed="false">▶ Play deliveries</button>
+      </div>
+      <svg id="map" viewBox="0 0 1000 620" role="img"
+           aria-label="Map of a fictional township showing each listed fitting's route to its new home. The list beside the map has the same information."></svg>
+      <ul class="wlegend">
+        <li><span class="sw route-done" aria-hidden="true"></span>Delivered</li>
+        <li><span class="sw route-on" aria-hidden="true"></span>Matched, on its way</li>
+        <li><span class="sw route-wait" aria-hidden="true"></span>Waiting for a match</li>
+      </ul>
+      <div class="pick" id="pick" aria-live="polite">Pick a listing to follow its journey.</div>
+    </section>
+
+    <aside class="panel list-panel" aria-labelledby="list-title">
+      <h3 id="list-title">Listings</h3>
+      <ol class="listings" id="listings">
+        {% for i in items %}
+          <li><button type="button" class="listing" data-id="{{ i.id }}">
+            <span class="l-top"><b>{{ i.name }}</b><span class="pill {{ i.status }}">{{ {'collected': 'Delivered', 'matched': 'On its way', 'unmatched': 'Waiting'}[i.status] }}</span></span>
+            <span class="l-sub">{% if i.km is not none %}{{ '{:.1f}'.format(i.km) }} km to a neighbour{% else %}No match yet{% endif %}
+              {% if i.status == 'collected' %} · {{ '{:,.0f}'.format(i.carbon_saved_kg) }} kg CO₂e saved{% endif %}</span>
+          </button></li>
+        {% endfor %}
+      </ol>
+    </aside>
+  </div>
+
+  <section class="section" aria-labelledby="how-title">
+    <div class="section-head">
+      <h2 id="how-title">How matching works</h2>
+      <p>Simple rules, so it can run inside SDP's existing owner app or portal.</p>
+    </div>
+    <ol class="how">
+      <li><b>An owner lists a fitting</b>Something they're removing anyway, with photos and its condition.
+        Tiles and toilets aren't listed: hacked-out tiles break, and toilets aren't reused for hygiene reasons.</li>
+      <li><b>Only the same home type</b>Same design, same measurements, so it fits with no measuring or rework.</li>
+      <li><b>Nearest owner first</b>Short trips keep transport low. Each trip's carbon
+        ({{ trip_factor }} kg CO₂e per km, both ways) is taken off the saving.</li>
+    </ol>
+  </section>
+</div>
+
+<script>
+  const ITEMS = {{ items | tojson }};
+  const LAYOUT = {{ layout | tojson }};
+  const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const NS = 'http://www.w3.org/2000/svg';
+  const svg = document.getElementById('map');
+  const el = (tag, attrs = {}, parent = svg) => {
+    const n = document.createElementNS(NS, tag);
+    for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, v);
+    parent.appendChild(n);
+    return n;
+  };
+  const text = (x, y, s, attrs = {}) => { const t = el('text', { x, y, ...attrs }); t.textContent = s; return t; };
+  const STATUS = { collected: 'Delivered', matched: 'On its way', unmatched: 'Waiting for a match' };
+  const terraceOn = LAYOUT.active === 'terrace';
+
+  // ---- base map ----
+  el('rect', { x: 0, y: 0, width: 1000, height: 620, rx: 18, fill: '#f7f3ea' });
+  el('ellipse', { cx: 870, cy: 548, rx: 112, ry: 52, fill: '#d9e5d0' });
+  text(870, 553, 'Park', { class: 'map-label', 'text-anchor': 'middle' });
+  el('rect', { x: 722, y: 0, width: 22, height: 620, fill: '#e2d9c8' });
+  text(733, 610, 'Main road', { class: 'map-label small', 'text-anchor': 'middle' });
+  for (const [a, b] of LAYOUT.cross) el('rect', { x: a + 2, y: 60, width: b - a - 4, height: 520, fill: '#ece5d7' });
+  for (const y of LAYOUT.rows) {
+    for (const [x0, x1] of [[74, 226], [246, 402], [422, 578], [598, 704]]) {
+      el('rect', { x: x0, y: y - 6, width: x1 - x0, height: 12, rx: 3, fill: terraceOn ? '#e3d7c3' : '#ece5d8' });
+    }
+  }
+  text(76, 52, 'Terrace homes', { class: 'map-label' + (terraceOn ? '' : ' faded') });
+  LAYOUT.towers.forEach(([x, y], i) => {
+    el('rect', { x, y, width: 30, height: 30, rx: 4, fill: terraceOn ? '#ece5d8' : '#d6c9b2', stroke: terraceOn ? 'none' : '#a99c86' });
+    text(x + 15, y + 46, 'Tower ' + 'ABCDEF'[i], { class: 'map-label small' + (terraceOn ? ' faded' : ''), 'text-anchor': 'middle' });
+  });
+  text(785, 112, 'Condo towers', { class: 'map-label' + (terraceOn ? ' faded' : '') });
+  // scale bar: 200 units = 1 km
+  el('rect', { x: 76, y: 588, width: 200, height: 4, fill: '#8a8272' });
+  text(76, 610, '0', { class: 'map-label small' });
+  text(276, 610, '1 km', { class: 'map-label small', 'text-anchor': 'end' });
+
+  // ---- routes ----
+  const routes = el('g'), marks = el('g'), overlay = el('g');
+  function curve(a, b) {
+    const mx = (a[0] + b[0]) / 2, my = (a[1] + b[1]) / 2;
+    const dx = b[0] - a[0], dy = b[1] - a[1], len = Math.hypot(dx, dy) || 1;
+    const bend = Math.min(60, len * 0.2) + 8;
+    return `M${a[0]} ${a[1]} Q${mx - (dy / len) * bend} ${my + (dx / len) * bend} ${b[0]} ${b[1]}`;
+  }
+  const byId = {};
+  for (const it of ITEMS) {
+    byId[it.id] = it;
+    if (it.to) {
+      el('path', { id: 'p-' + it.id, d: curve(it.from, it.to), class: 'route ' + it.status }, routes);
+      const hit = el('path', { d: curve(it.from, it.to), class: 'route-hit', 'data-id': it.id }, routes);
+      hit.appendChild(document.createElementNS(NS, 'title')).textContent = `${it.name}: ${it.km} km, ${STATUS[it.status]}`;
+      el('circle', { cx: it.to[0], cy: it.to[1], r: 5, class: 'home-to ' + it.status }, marks);
+    }
+    const from = el('circle', { cx: it.from[0], cy: it.from[1], r: 5, class: 'home-from ' + it.status, 'data-id': it.id }, marks);
+    from.appendChild(document.createElementNS(NS, 'title')).textContent = `${it.name}: ${STATUS[it.status]}`;
+  }
+
+  // ---- selecting a listing ----
+  const pick = document.getElementById('pick');
+  function select(id) {
+    const it = byId[id];
+    if (!it) return;
+    overlay.innerHTML = '';
+    document.querySelectorAll('.listing').forEach(b => b.classList.toggle('on', b.dataset.id === id));
+    const btn = document.querySelector(`.listing[data-id="${id}"]`);
+    if (btn) btn.scrollIntoView({ block: 'nearest', behavior: reduced ? 'auto' : 'smooth' });
+    if (it.to) {
+      el('path', { d: curve(it.from, it.to), class: 'route-sel' }, overlay);
+      const dot = el('circle', { r: 8, class: 'van', cx: reduced ? it.to[0] : 0, cy: reduced ? it.to[1] : 0 }, overlay);
+      if (!reduced) {
+        const anim = el('animateMotion', { dur: '1.4s', fill: 'freeze', repeatCount: '1', begin: 'indefinite' }, dot);
+        const mp = el('mpath', {}, anim);
+        mp.setAttribute('href', '#p-' + id);
+        mp.setAttributeNS('http://www.w3.org/1999/xlink', 'xlink:href', '#p-' + id);
+        anim.beginElement();
+      }
+      el('circle', { cx: it.from[0], cy: it.from[1], r: 7, class: 'sel-from' }, overlay);
+      pick.innerHTML = `<b>${it.name}</b> · ${STATUS[it.status]} · ${it.km} km from owner ${it.from_owner} to ${it.to_owner}`
+        + (it.status === 'collected' ? ` · <b>${Math.round(it.carbon_saved_kg)} kg CO₂e</b> saved` : '');
+    } else {
+      el('circle', { cx: it.from[0], cy: it.from[1], r: 9, class: 'sel-wait' }, overlay);
+      pick.innerHTML = `<b>${it.name}</b> · listed by owner ${it.from_owner} · waiting for a nearby owner of the same home type`;
+    }
+  }
+  svg.addEventListener('click', e => { const id = e.target.getAttribute('data-id'); if (id) { stop(); select(id); } });
+  document.querySelectorAll('.listing').forEach(b => b.addEventListener('click', () => { stop(); select(b.dataset.id); }));
+
+  // ---- play every delivery in turn ----
+  const playBtn = document.getElementById('play');
+  let timer = null;
+  function stop() { clearInterval(timer); timer = null; playBtn.textContent = '▶ Play deliveries'; playBtn.setAttribute('aria-pressed', 'false'); }
+  playBtn.addEventListener('click', () => {
+    if (timer) return stop();
+    const queue = ITEMS.filter(i => i.status === 'collected').map(i => i.id);
+    if (!queue.length) return;
+    let n = 0;
+    select(queue[n++]);
+    playBtn.textContent = '■ Stop'; playBtn.setAttribute('aria-pressed', 'true');
+    timer = setInterval(() => { if (n >= queue.length) return stop(); select(queue[n++]); }, 1700);
+  });
+</script>
+</body>
+</html>
