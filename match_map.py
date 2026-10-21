@@ -120,8 +120,8 @@ def asks(data, unit_type):
 
 
 def map_layout(unit_type):
-    """Static features for drawing the township."""
+    """Static features for drawing the township: every terrace house (slots), the streets and the towers."""
     return {
-        "rows": TERRACE_ROWS, "cross": CROSS_STREETS, "towers": TOWERS,
+        "rows": TERRACE_ROWS, "cross": CROSS_STREETS, "towers": TOWERS, "slots": SLOTS,
         "active": "towers" if unit_type == "C3R" else "terrace",
     }
