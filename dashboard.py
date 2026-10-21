@@ -100,6 +100,16 @@ def _home_type(who):
     return unit if unit in UNIT_TYPES else None
 
 
+def _signed_in_as(kind, unit):
+    """
+    The signed-in person's id if they are a buyer (kind "B") or a homeowner ("O")
+    of this home type, else None. The Advisor saves under that buyer and AI
+    tagging under that homeowner; anyone else saves as a new buyer or owner.
+    """
+    who = signed_in()
+    return who if who and _home_type(who) == unit and who.startswith(f"{unit}-{kind}") else None
+
+
 @dashboard_bp.app_context_processor
 def signed_in_person():
     """`signed_in` for every page's top bar: None, SDP_PERSON, or the neighbour (community.person)."""
@@ -310,11 +320,18 @@ def advisor():
             ["upgrade_id", "name", "description", "image"]].to_dict("records")
     house = [{k: r[k] for k in ("fitting_id", "name", "eligibility", "owners", "removed", "rate", "advice")}
              for r in records]
+    buyer = _signed_in_as("B", unit)   # their earlier choices are filled in, and Confirm replaces them
+    c = data["choices"]
+    saved = {fid: {"choice": ch, "upgrade_id": up}
+             for fid, ch, up in zip(c.fitting_id[c.buyer_id == buyer], c.choice[c.buyer_id == buyer],
+                                    c.upgrade_id[c.buyer_id == buyer])} if buyer else {}
     return render_template(
         "advisor.html",
         unit=unit,
         unit_types=UNIT_TYPES,
         unit_info=UNIT_INFO[unit],
+        saving_as=community.person(buyer) if buyer else None,
+        saved=saved,
         choosable=[r for r in records if r["eligibility"] != "fixed"],
         included=[r for r in records if r["eligibility"] == "fixed"],
         house_fittings=house,
@@ -334,10 +351,11 @@ def api_choices():
     if not _known_unit(unit) or not isinstance(picks, dict) or not isinstance(upgrade_picks, dict):
         return jsonify({"error": "Send a known unit, a choices object and an optional upgrades object"}), 400
     try:
-        buyer_id = impact.save_buyer_choices(unit, picks, upgrade_picks=upgrade_picks)
+        buyer = _signed_in_as("B", unit)   # from the sign-in, never from the request body
+        buyer_id = impact.save_buyer_choices(unit, picks, upgrade_picks=upgrade_picks, buyer_id=buyer)
     except (KeyError, ValueError) as e:
         return jsonify({"error": e.args[0] if e.args else str(e)}), 400
-    return jsonify({"buyer_id": buyer_id,
+    return jsonify({"buyer_id": buyer_id, "name": community.person(buyer_id)["name"] if buyer else None,
                     "totals": impact.dashboard_totals(_data(), unit)})
 
 
@@ -377,9 +395,10 @@ def tagger_page():
         t = tagger.tag(note, fitting_ids=_unit_fitting_ids(data, unit))["tags"]
         samples.append({"note": note, "truth": truth, "got": t[0]["fitting_id"] if t else None,
                         "truth_name": names.get(truth, truth)})
+    owner = _signed_in_as("O", unit)
     return render_template("tagger.html", unit=unit, unit_types=UNIT_TYPES, ev=ev,
                            samples=list(reversed(samples)), examples=EXAMPLE_NOTES,
-                           names=names,
+                           names=names, saving_as=community.person(owner) if owner else None,
                            reusable=sorted(_unit_fitting_ids(data, unit) - impact.NOT_REUSABLE))
 
 
@@ -407,11 +426,12 @@ def api_report():
     if not _known_unit(unit) or not isinstance(fids, list):
         return jsonify({"error": "Send a known unit and a list of fittings"}), 400
     try:
-        owner = impact.add_ripout_report(unit, fids, body.get("note", ""))
+        signed = _signed_in_as("O", unit)   # from the sign-in, never from the request body
+        owner = impact.add_ripout_report(unit, fids, body.get("note", ""), owner_id=signed)
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
     idx = impact.ripout_index(_data(), unit)
-    return jsonify({"owner_id": owner,
+    return jsonify({"owner_id": owner, "name": community.person(owner)["name"] if signed else None,
                     "rates": {fid: round(rate * 100, 1) for fid, rate in zip(idx.fitting_id, idx.rate)}})
 
 
