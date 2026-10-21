@@ -334,8 +334,13 @@ There are no passwords: everyone in the demo is simulated. `/signin` offers
 three roles, SDP staff, a homeowner or a buyer moving in, with a suggested
 person for each home type, or anyone from a list. Who is signed in is kept in
 Flask's signed session cookie, shown at the top right of every page, and decides
-whose view Neighbour Match shows and which home type opens first. Every page
-still works without signing in.
+whose view Neighbour Match shows and which home type opens first. A buyer
+signed in on the Advisor sees their earlier choices filled in, and Confirm
+replaces them (still one buyer on the dashboard). A homeowner signed in on AI
+tagging adds the report to their own rip-out record, so one owner never counts
+twice. Anyone else saves as a new buyer or owner. The person always comes from
+the sign-in, never from the request, so nobody can save as someone else. Every
+page still works without signing in.
 
 `dashboard.signed_in()` is the one place the app asks who is signed in. The
 real login (with the database) should replace it and the `/signin` routes,
