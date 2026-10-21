@@ -9,7 +9,8 @@ app.py plugs it into the main app with:
 Pages (all take ?unit=T2S or ?unit=C3R):
     /advisor            buyer Fit-Out Advisor: keep / opt out / upgrade
     /dashboard          the SDP dashboard
-    /match              Neighbour Match map
+    /match              Neighbour Match community: feed, give, ask, chat, collect, map
+                        (&as=T2S-O001 picks which simulated neighbour you are)
     /simulate           What-if launch projection
     /tagger             AI tagging of messy renovation notes
 API (JSON; bad input -> 400 with an "error"):
@@ -19,6 +20,13 @@ API (JSON; bad input -> 400 with an "error"):
     POST /api/choices   {"unit", "choices", "upgrades"?}   saves a buyer
     POST /api/tag       {"unit", "note"}                  tags one note
     POST /api/report    {"unit", "note", "fittings"}      saves a rip-out report
+    POST /api/match/list     {"unit", "owner", "fitting", "condition"?, "note"?, "request_id"?}
+                                                                 offers a removed fitting
+    POST /api/match/request  {"unit", "requester", "fitting", "note"?}   asks for one
+    POST /api/match/claim    {"listing_id", "requester"}         takes one offer
+    POST /api/match/comment  {"post_id", "author", "text"}       a message on a post
+    POST /api/match/collect  {"listing_id", "by"?, "thanks"?}    marks it picked up
+    POST /api/reset-demo     puts every data file back to the starting demo data
     GET  /export/<ripout-index|impact-by-fitting|upgrade-mix|choices>.csv?unit=T2S
 """
 
@@ -28,8 +36,11 @@ import math
 from flask import Blueprint, Response, abort, jsonify, make_response, render_template, request
 import plotly.graph_objects as go
 
+import generate_dummy_data
+import community
 import impact
 import match_map
+import neighbour_match
 import tagger
 from generate_dummy_data import UNIT_TYPES
 
@@ -198,8 +209,9 @@ def api_impact():
     choice = request.args.get("choice", "keep")
     upgrade = request.args.get("upgrade") or None
     data = _data()
+    rate = impact.ripout_rates(data, unit).get((unit, fitting))
     try:
-        return jsonify(impact.impact_of(data["fittings"], unit, fitting, choice, upgrade, data["upgrades"]))
+        return jsonify(impact.impact_of(data["fittings"], unit, fitting, choice, upgrade, data["upgrades"], rate))
     except (KeyError, ValueError) as e:
         # str() of a KeyError wraps the message in quotes, so read it from args.
         return jsonify({"error": e.args[0] if e.args else str(e)}), 400
@@ -285,7 +297,8 @@ def tagger_page():
                         "truth_name": tagger.NAMES.get(truth, truth)})
     return render_template("tagger.html", unit=unit, unit_types=UNIT_TYPES, ev=ev,
                            samples=list(reversed(samples)), examples=EXAMPLE_NOTES,
-                           names=tagger.NAMES)
+                           names=tagger.NAMES,
+                           reusable=sorted(_unit_fitting_ids(data, unit) - impact.NOT_REUSABLE))
 
 
 @dashboard_bp.route("/api/tag", methods=["POST"])
@@ -317,10 +330,16 @@ def api_report():
 
 @dashboard_bp.route("/match")
 def match():
-    """Neighbour Match: removed fittings rehomed to same-type homes nearby."""
+    """Neighbour Match: the community feed for one home type, as one (simulated) neighbour."""
     unit = _unit()
     data = _data()
+    hints = neighbour_match.suggestions(data, unit)
+    members = neighbour_match.people(data, unit)
+    you = request.args.get("as", "")
+    if you not in members:   # default: an owner with something a neighbour is asking for
+        you = hints["can_list"][0][0] if hints["can_list"] else min(members)
     items = match_map.listings(data, unit)
+    asks = match_map.asks(data, unit)
     reuse = impact.reuse_summary(data, unit)   # the same figures as the dashboard
     trips = [i["km"] for i in items if i["km"] is not None]
     summary = {
@@ -328,13 +347,103 @@ def match():
         "collected": reuse["collected"],
         "matched": sum(i["status"] == "matched" for i in items),
         "waiting": sum(i["status"] == "unmatched" for i in items),
+        "asking": len(asks),
         "reused_kg": reuse["material_reused_kg"],
         "carbon_kg": reuse["carbon_saved_kg"],
         "avg_km": (sum(trips) / len(trips)) if trips else 0,
+        "neighbours": community.stats(data, unit)["neighbours"],
     }
-    return render_template("match.html", unit=unit, unit_types=UNIT_TYPES, items=items,
-                           summary=summary, layout=match_map.map_layout(unit),
-                           trip_factor=impact.TRANSPORT_KGCO2E_PER_KM)
+    f = data["fittings"]
+    reusable = [{"id": i, "name": n} for i, n in zip(f.fitting_id[f.unit_type == unit], f.name[f.unit_type == unit])
+                if i not in impact.NOT_REUSABLE]
+    neighbours = community.everyone(data, unit)
+    req = data["requests"]
+    return render_template(
+        "match.html", unit=unit, unit_types=UNIT_TYPES, items=items, asks=asks, summary=summary,
+        layout=match_map.map_layout(unit), reusable=reusable, hints=hints,
+        you=community.you_card(data, unit, you), you_at=match_map.position(you, unit),
+        posts=community.feed(data, unit, you), board=community.leaderboard(data, unit),
+        activity=community.activity(data, unit), neighbours=neighbours,
+        names={n["id"]: n["name"] for n in neighbours},
+        wanted_fittings=dict(zip(req.request_id[req.unit_type == unit], req.fitting_id[req.unit_type == unit])),
+        conditions=neighbour_match.CONDITIONS, max_text=neighbour_match.MAX_TEXT,
+        trip_factor=impact.TRANSPORT_KGCO2E_PER_KM)
+
+
+def _match_call(step):
+    """Run a Neighbour Match step: its result as JSON, or a 400 with the reason."""
+    try:
+        return jsonify(step())
+    except (KeyError, ValueError) as e:
+        return jsonify({"error": e.args[0] if e.args else str(e)}), 400
+
+
+def _optional_id(body, key):
+    """An optional id from a request body: None if left out, else a string."""
+    return None if body.get(key) is None else str(body[key])
+
+
+@dashboard_bp.route("/api/match/list", methods=["POST"])
+def api_match_list():
+    """
+    Body: {"unit", "owner", "fitting", "condition"?, "note"?, "request_id"?} -> {"listing": ...}.
+    Matched at once to the nearest neighbour asking, or to request_id when answering that post.
+    """
+    body = _json_body()
+    return _match_call(lambda: {"listing": neighbour_match.list_item(
+        body.get("unit", ""), str(body.get("owner", "")), str(body.get("fitting", "")),
+        condition=str(body.get("condition") or "Good"), note=body.get("note", ""),
+        request_id=_optional_id(body, "request_id"))})
+
+
+@dashboard_bp.route("/api/match/request", methods=["POST"])
+def api_match_request():
+    """Body: {"unit", "requester", "fitting"} -> {"request": ..., "listing": ... or null}."""
+    body = _json_body()
+
+    def ask():
+        req, listing = neighbour_match.request_item(
+            body.get("unit", ""), str(body.get("requester", "")), str(body.get("fitting", "")),
+            note=body.get("note", ""))
+        return {"request": req, "listing": listing}
+    return _match_call(ask)
+
+
+@dashboard_bp.route("/api/match/claim", methods=["POST"])
+def api_match_claim():
+    """Body: {"listing_id", "requester"} -> {"request": ..., "listing": ...}: "I'd like this"."""
+    body = _json_body()
+
+    def take():
+        req, listing = neighbour_match.claim(str(body.get("listing_id", "")), str(body.get("requester", "")))
+        return {"request": req, "listing": listing}
+    return _match_call(take)
+
+
+@dashboard_bp.route("/api/match/comment", methods=["POST"])
+def api_match_comment():
+    """Body: {"post_id", "author", "text"} -> {"message": ...}."""
+    body = _json_body()
+    return _match_call(lambda: {"message": neighbour_match.comment(
+        str(body.get("post_id", "")), str(body.get("author", "")), body.get("text", ""))})
+
+
+@dashboard_bp.route("/api/match/collect", methods=["POST"])
+def api_match_collect():
+    """
+    Body: {"listing_id", "by"?, "thanks"?} -> {"listing": ...} with its carbon saved.
+    `by` is the giver or the neighbour taking it; that neighbour can add a thank-you note.
+    """
+    body = _json_body()
+    return _match_call(lambda: {"listing": neighbour_match.collect(
+        str(body.get("listing_id", "")), by=_optional_id(body, "by"), thanks=body.get("thanks", ""))})
+
+
+@dashboard_bp.route("/api/reset-demo", methods=["POST"])
+def api_reset_demo():
+    """Every data file back to the starting demo data (same seed, same data every time)."""
+    generate_dummy_data.main()
+    return jsonify({"ok": True})
 
 
 # The What-if sliders: name -> (min, max, step). The page draws its sliders from
