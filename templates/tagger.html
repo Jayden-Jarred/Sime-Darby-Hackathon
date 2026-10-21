@@ -138,8 +138,13 @@
     if (!res.tags.length) {
       tagsEl.innerHTML = '<p class="muted">No tracked fittings found' + (note.trim() ? '. Try naming the item, e.g. "kabinet" or "wardrobe".' : '.') + '</p>';
     } else {
-      tagsEl.innerHTML = res.tags.map(t => `
-        <div class="tag-card">
+      // A tick for each fitting found; alternatives for one item (pick_one) are a choice of one.
+      const picking = res.tags.some(t => t.pick_one);
+      tagsEl.innerHTML = (picking ? '<p class="pick-note">The note doesn\'t say which wardrobe. Pick the one that was removed.</p>' : '')
+        + res.tags.map(t => `
+        <label class="tag-card">
+          ${t.pick_one ? `<input type="radio" name="pick-${t.pick_one}" value="${t.fitting_id}">`
+                       : `<input type="checkbox" value="${t.fitting_id}" checked>`}
           <span class="sw fx-${t.fitting_id}" aria-hidden="true"></span>
           <div class="tag-body">
             <b>${esc(t.name)}</b>
@@ -149,10 +154,19 @@
             <span class="conf-bar"><span style="width:${Math.round(t.confidence * 100)}%"></span></span>
             <small>${Math.round(t.confidence * 100)}% sure</small>
           </div>
-        </div>`).join('');
+        </label>`).join('');
     }
-    addBtn.disabled = !res.tags.length;
+    updateAdd();
   }
+
+  const chosen = () => [...tagsEl.querySelectorAll('input:checked')].map(i => i.value);
+  // A report needs at least one fitting, and a pick in every "which one" group.
+  function updateAdd() {
+    const groups = new Set(current.tags.map(t => t.pick_one).filter(Boolean));
+    const picked = [...groups].every(g => tagsEl.querySelector(`input[name="pick-${g}"]:checked`));
+    addBtn.disabled = !chosen().length || !picked;
+  }
+  tagsEl.addEventListener('change', updateAdd);
 
   async function run() {
     const note = noteEl.value, my = ++seq;
@@ -172,10 +186,13 @@
     noteEl.value = b.dataset.note; added.innerHTML = ''; run(); noteEl.focus();
   }));
 
+  const REUSABLE = {{ reusable | tojson }};   // fittings Neighbour Match can rehome
+  const showError = msg => { const d = document.createElement('div'); d.className = 'error'; d.textContent = msg; added.append(d); };
+
   addBtn.addEventListener('click', async () => {
-    if (!current.tags.length) return;
+    const fittings = chosen();
+    if (!fittings.length) return;
     addBtn.disabled = true;
-    const fittings = current.tags.map(t => t.fitting_id);
     try {
       const res = await fetch('/api/report', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -183,14 +200,42 @@
       });
       const body = await res.json();
       if (!res.ok) throw new Error(body.error || 'Could not save');
-      const lines = current.tags.map(t => `${esc(t.name)}: now <b>${body.rates[t.fitting_id]}%</b> of owners`).join('<br>');
+      const name = fid => esc(current.tags.find(t => t.fitting_id === fid).name);
+      const lines = fittings.map(f => `${name(f)}: now <b>${body.rates[f]}%</b> of owners`).join('<br>');
+      const offers = fittings.filter(f => REUSABLE.includes(f)).map(f =>
+        `<button type="button" class="ex offer" data-fitting="${f}">Offer the ${name(f).toLowerCase()} to neighbours</button>`).join('');
       added.innerHTML = `<div class="saved light">Saved as report <b>${body.owner_id}</b>.<br>${lines}<br>`
-        + `<a href="/dashboard?unit=${encodeURIComponent(UNIT)}">See the rip-out index →</a></div>`;
+        + `<a href="/dashboard?unit=${encodeURIComponent(UNIT)}">See the rip-out index →</a>`
+        + (offers ? `<div class="offer-row">${offers}</div>` : '') + '</div>';
+      added.dataset.owner = body.owner_id;
     } catch (e) {
       added.innerHTML = '';
-      const d = document.createElement('div'); d.className = 'error'; d.textContent = e.message; added.append(d);
+      showError(e.message);
     } finally {
-      addBtn.disabled = !current.tags.length;
+      updateAdd();
+    }
+  });
+
+  // Track -> Match: offer a fitting this owner just reported on Neighbour Match.
+  added.addEventListener('click', async e => {
+    const btn = e.target.closest('.offer');
+    if (!btn) return;
+    btn.disabled = true;
+    try {
+      const res = await fetch('/api/match/list', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ unit: UNIT, owner: added.dataset.owner, fitting: btn.dataset.fitting }),
+      });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.error || 'Could not list it');
+      const l = body.listing;   // opens Neighbour Match as this owner, on the new post
+      const link = `/match?unit=${encodeURIComponent(UNIT)}&as=${encodeURIComponent(l.from_owner)}&focus=${encodeURIComponent(l.listing_id)}`;
+      btn.outerHTML = `<span class="offer-done">${l.status === 'matched'
+        ? `Matched with a neighbour ${l.distance_km.toFixed(1)} km away.`
+        : 'Posted. Waiting for a neighbour who needs one.'} <a href="${link}">See the post →</a></span>`;
+    } catch (err) {
+      btn.disabled = false;
+      showError(err.message);
     }
   });
 
