@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 100">
+  <!-- Open walk-in system: hanging rails, open shelves and drawers, no doors. Illustration, not a product photo. -->
+  <rect width="160" height="100" fill="#f2ece2"/>
+  <rect y="90" width="160" height="10" fill="#e2d9c9"/>
+  <rect x="12" y="6" width="136" height="84" fill="#e9e1d3"/>
+  <!-- uprights and top shelf (oak) -->
+  <g fill="#cfae7f">
+    <rect x="12" y="6" width="3" height="84"/><rect x="57" y="6" width="3" height="84"/>
+    <rect x="101" y="6" width="3" height="84"/><rect x="145" y="6" width="3" height="84"/>
+    <rect x="12" y="16" width="136" height="2.4"/>
+  </g>
+  <!-- left bay: long hanging -->
+  <rect x="15" y="22" width="42" height="1.4" fill="#8d8f91"/>
+  <g stroke="#6f6a63" stroke-width=".7" fill="none">
+    <path d="M20 23v2M27 23v2M34 23v2M41 23v2M48 23v2"/>
+  </g>
+  <rect x="17" y="25" width="6.5" height="44" rx="1.5" fill="#5f7d6b"/>
+  <rect x="24" y="25" width="6.5" height="38" rx="1.5" fill="#c98b6b"/>
+  <rect x="31" y="25" width="6.5" height="48" rx="1.5" fill="#3f4a5c"/>
+  <rect x="38" y="25" width="6.5" height="40" rx="1.5" fill="#e2d3b8"/>
+  <rect x="45" y="25" width="6.5" height="45" rx="1.5" fill="#8b6f9e"/>
+  <rect x="15" y="80" width="42" height="2" fill="#cfae7f"/>
+  <g fill="#4a4038"><rect x="19" y="76" width="7" height="4" rx="1.5"/><rect x="29" y="76" width="7" height="4" rx="1.5"/><rect x="41" y="76.5" width="8" height="3.5" rx="1.5" fill="#a0522d"/></g>
+  <!-- middle bay: open shelves -->
+  <g fill="#cfae7f"><rect x="60" y="34" width="41" height="2"/><rect x="60" y="52" width="41" height="2"/><rect x="60" y="70" width="41" height="2"/></g>
+  <g>
+    <rect x="64" y="26" width="14" height="3" fill="#7f9bb0"/><rect x="64" y="29" width="14" height="3" fill="#e4d9c6"/><rect x="64" y="23" width="14" height="3" fill="#b65f4a"/>
+    <rect x="82" y="27" width="15" height="7" rx="1.5" fill="#bfa27a"/>
+    <rect x="64" y="44" width="15" height="3" fill="#3f4a5c"/><rect x="64" y="47" width="15" height="3" fill="#d7c6a6"/><rect x="64" y="41" width="15" height="3" fill="#6d8f74"/>
+    <rect x="83" y="45" width="13" height="3" fill="#eadfcd"/><rect x="83" y="48" width="13" height="4" fill="#9a7e6b"/>
+    <rect x="65" y="62" width="30" height="8" rx="2" fill="#bfa27a"/><path d="M65 66h30" stroke="#a88a62" stroke-width=".8"/>
+  </g>
+  <!-- right bay: short hanging over drawers -->
+  <rect x="104" y="22" width="41" height="1.4" fill="#8d8f91"/>
+  <rect x="107" y="25" width="7" height="24" rx="1.5" fill="#f1ece3"/>
+  <rect x="115" y="25" width="7" height="22" rx="1.5" fill="#7f9bb0"/>
+  <rect x="123" y="25" width="7" height="25" rx="1.5" fill="#d9a48a"/>
+  <rect x="131" y="25" width="7" height="23" rx="1.5" fill="#5f7d6b"/>
+  <g fill="#e1c9a0" stroke="#bfa27a" stroke-width=".8">
+    <rect x="104" y="56" width="41" height="11"/><rect x="104" y="67" width="41" height="11"/><rect x="104" y="78" width="41" height="12"/>
+  </g>
+  <g fill="#4a4038"><rect x="120" y="61" width="9" height="1.5" rx=".7"/><rect x="120" y="72" width="9" height="1.5" rx=".7"/><rect x="120" y="83" width="9" height="1.5" rx=".7"/></g>
+</svg>
