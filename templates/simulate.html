@@ -104,7 +104,8 @@
   <section class="section" aria-labelledby="fit-title">
     <div class="section-head">
       <h2 id="fit-title">Fitting by fitting</h2>
-      <p>Homes are rounded. Tiles can't be rehomed once hacked out, and toilets aren't offered for hygiene reasons.</p>
+      <p>Homes are rounded. Tiles can't be rehomed once hacked out, and toilets aren't offered for hygiene reasons.
+        Tiles are a big share of the waste because they are heavy: see <a class="inline-link" href="#tiles-note">why tiles count here</a>.</p>
     </div>
     <div class="panel">
       <table>
@@ -123,6 +124,13 @@
       <li>SDP gains = installation it skips minus credits paid, plus its margin on upgrades, minus the running cost.</li>
       <li>Rehomed fittings count their carbon, minus a {{ trip }} km delivery trip each way ({{ transport }} kg CO₂e per km).</li>
       <li>"Pays for itself after" = running cost ÷ SDP's gain per home.</li>
+      <li id="tiles-note"><b>Why tiles count here but not in the Advisor.</b> Both follow one rule: carbon only counts for
+        a fitting that would really have been made and then ripped out. Here we know how many homes that is:
+        {{ '{:.0f}'.format(tiles.rate * 100) }}% of owners rip out the {{ tiles.name | lower }}, so the projection counts
+        only those homes. The {{ tiles.name | lower }} weigh {{ '{:,.0f}'.format(tiles.weight_kg) }} kg per home, far more
+        than any other fitting, so even that minority adds up to a large share of the waste avoided. In the Advisor
+        we can't know whether one buyer would have ripped them out, so it only counts carbon for fittings at least
+        {{ threshold }}% of owners remove, and tiles are below that.</li>
     </ul>
   </section>
 </div>
