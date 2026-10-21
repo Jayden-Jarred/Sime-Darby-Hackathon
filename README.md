@@ -63,8 +63,11 @@ chat. Here the kitchen top was rehomed, and the neighbour left a thank-you note.
 
 ![A rehomed post with the pickup chat and a thank-you note](docs/screenshots/match-feed.png)
 
-The township map: every trip from the giver to the neighbour taking it. Click a
-route to follow it, or Play deliveries.
+The township map: every terrace house, the streets, condo towers, park and
+traffic. Delivered routes draw themselves in, vans drive the fittings that are
+on their way, and pointing at a home shows who lives there. Click a route (or
+Play deliveries) to follow a van and see the carbon it saved. The condo view
+zooms in on the towers. Nothing moves for viewers who ask for reduced motion.
 
 ![The township map with delivery routes and your home](docs/screenshots/match-map.png)
 
