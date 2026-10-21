@@ -1,0 +1,302 @@
+{#- Buyer Fit-Out Advisor  ·  /advisor?unit=T2S  ·  rendered by dashboard.advisor()
+    For each fitting the buyer picks Keep, Opt out (for a credit) or Upgrade, and which
+    upgrade option (pictures in static/upgrades/). Each pick fetches its savings from
+    /api/impact and shows it on the 3D home (static/house3d.js, colorBy 'choice').
+    "Confirm my choices" saves them with POST /api/choices. -#}
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Right-Fit Homes · Fit-Out Advisor</title>
+  <link rel="preload" href="{{ url_for('static', filename='fonts/fraunces.woff2') }}" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="{{ url_for('static', filename='fonts/figtree.woff2') }}" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
+</head>
+<body class="advisor" style="{{ advice_css }}">
+<div class="wrap">
+  {% set page = 'advisor' %}{% include '_topbar.html' %}
+
+  <header class="page-head">
+    <div>
+      <p class="kicker">Your fit-out · before handover</p>
+      <h1 class="headline">Choose before it's built. <em>Keep only what you'll love.</em></h1>
+      <p class="standfirst">Many new owners rip out a brand-new kitchen or wardrobe soon after getting their keys.
+        Tell us now, and get a <b>credit</b> or an <b>upgrade</b> instead of a skip full of fittings.</p>
+      <span class="sim-badge" title="Estimates from public Malaysian prices and the ICE carbon database, not SDP prices.">
+        <i aria-hidden="true">!</i>Simulated data</span>
+    </div>
+    <div class="unit-picker">
+      <span class="label" id="unit-label">Your home</span>
+      <nav class="tabs" aria-labelledby="unit-label">
+        {% for code, label in unit_types.items() %}
+          <a href="?unit={{ code }}" class="{{ 'on' if code == unit else '' }}"
+             {% if code == unit %}aria-current="page"{% endif %}>{{ label }}</a>
+        {% endfor %}
+      </nav>
+    </div>
+  </header>
+
+  <section class="house" id="house" data-view="fittings" aria-label="3D preview of your home">
+    <div class="house-canvas" role="img"
+         aria-label="3D model of a {{ unit_info.title }}. Fittings you opt out of fade away; upgrades show the finish you picked."></div>
+    <div class="house-fallback">The 3D preview needs WebGL, which this browser has turned off. Your choices below still work.</div>
+    <div class="house-help">Drag to rotate · scroll to zoom</div>
+    <div class="house-card">
+      <div class="eyebrow">Your new home</div>
+      <h2>{{ unit_info.title }}</h2>
+      <ul class="facts">
+        {% for f in unit_info.facts %}<li>{{ f }}</li>{% endfor %}
+      </ul>
+      <div class="seg" role="group" aria-label="3D view">
+        <button type="button" data-view-btn="exterior" aria-pressed="false">Exterior</button>
+        <button type="button" data-view-btn="fittings" aria-pressed="true">Fittings</button>
+      </div>
+      <div class="floor-pick" data-floor-picker hidden>
+        <span class="floor-label" id="floor-label">Floor</span>
+        <div class="seg" role="group" aria-labelledby="floor-label"></div>
+      </div>
+      <p class="view-hint">Opt out of an item and it fades from the model. Tap an item to zoom in and jump to its choice.</p>
+    </div>
+    <div class="house-legend" aria-label="Colour key">
+      <span class="chip"><span class="sw keep" aria-hidden="true"></span>Standard</span>
+      <span class="chip"><span class="sw opt_out" aria-hidden="true"></span>Not installed</span>
+      <span class="chip"><span class="sw upgrade" aria-hidden="true"></span>Upgraded</span>
+    </div>
+  </section>
+
+  <div class="section">
+    <div class="section-head">
+      <h2>Your fittings, most ripped out first</h2>
+      <p>Based on what owners of this home type removed after handover.</p>
+    </div>
+  </div>
+
+  <div class="advisor-grid">
+    <div class="choice-list">
+      {% for f in choosable %}
+        {% set pct = '{:.0f}'.format(f.rate * 100) %}
+        <fieldset class="choice" data-fid="{{ f.fitting_id }}">
+          <legend><h3>{{ f.name }}</h3></legend>
+          <div class="choice-head">
+            <p class="proof"><b>{{ pct }}%</b> of owners removed them ({{ f.removed }} of {{ f.owners }})</p>
+            <div class="meter" aria-hidden="true"><span style="width: {{ pct }}%"></span></div>
+          </div>
+          <div class="options {{ 'two' if f.eligibility == 'upgrade_only' }}">
+            <label class="opt keep">
+              <input type="radio" name="c-{{ f.fitting_id }}" value="keep" checked>
+              <span><b>Keep</b><small>Installed as standard</small></span>
+            </label>
+            {% if f.eligibility == 'opt_out' %}
+            <label class="opt opt_out">
+              <input type="radio" name="c-{{ f.fitting_id }}" value="opt_out">
+              <span><b>Opt out</b><small>RM {{ '{:,.0f}'.format(f.credit_rm) }} credit</small></span>
+            </label>
+            {% endif %}
+            <label class="opt upgrade">
+              <input type="radio" name="c-{{ f.fitting_id }}" value="upgrade">
+              <span><b>Upgrade</b><small>{{ 'Pick from %d options' % (f.upgrades | length) if f.upgrades
+                                            else 'Better version installed instead' }}</small></span>
+            </label>
+          </div>
+          {% if f.upgrades %}
+          <fieldset class="upgrade-pick" hidden>
+            <legend>Upgrade to</legend>
+            <div class="options {{ 'two' if f.upgrades|length == 2 }}">
+              {% for u in f.upgrades %}
+              <label class="opt upgrade">
+                <input type="radio" name="u-{{ f.fitting_id }}" value="{{ u.upgrade_id }}"
+                       data-name="{{ u.name }}" {{ 'checked' if loop.first }}>
+                <span>{% if u.image is string and u.image %}<img src="{{ url_for('static', filename=u.image) }}"
+                        alt="" width="160" height="100" loading="lazy">{% endif %}<b>{{ u.name }}</b><small>{{ u.description }}</small></span>
+              </label>
+              {% endfor %}
+            </div>
+          </fieldset>
+          {% endif %}
+          <p class="impact-line" aria-live="polite"></p>
+        </fieldset>
+      {% endfor %}
+      {% if included %}
+        <p class="included"><b>Always included:</b>
+          {% for f in included %}{{ f.name }}{{ ', ' if not loop.last }}{% endfor %} (needed before handover).</p>
+      {% endif %}
+    </div>
+
+    <aside class="summary" id="summary" aria-labelledby="summary-title">
+      <h2 id="summary-title">Your choices</h2>
+      <p class="lead" id="changed-count">Nothing changed yet. Everything is installed as standard.</p>
+      <p class="big" id="sum-total" aria-live="polite"><small>RM</small> 0</p>
+      <p class="big-label">back in your pocket</p>
+      <div class="sum-rows">
+        <div class="sum-row"><span>Credit from SDP</span><b id="sum-credit">RM 0</b></div>
+        <div class="sum-row"><span>Rip-out costs you skip</span><b id="sum-ripout">RM 0</b></div>
+        <div class="sum-row"><span>Material not wasted</span><b id="sum-material">0 kg</b></div>
+        <div class="sum-row"><span>Carbon never produced</span><b id="sum-carbon">0 kg CO₂e</b></div>
+      </div>
+      <button type="button" class="btn-primary" id="confirm">Confirm my choices</button>
+      <button type="button" class="btn-link" id="reset">Reset to standard</button>
+      <div id="result" aria-live="polite"></div>
+      <p class="fine-print">Estimates from simulated data. Upgrade prices would be quoted by SDP.</p>
+    </aside>
+  </div>
+</div>
+
+<div class="sum-bar" aria-hidden="true">
+  <span id="bar-text">RM 0 back · 0 kg CO₂e saved</span>
+  <a href="#summary">Review</a>
+</div>
+
+<script type="importmap">
+  {"imports": {
+    "three": "{{ url_for('static', filename='vendor/three.module.min.js') }}",
+    "three/addons/": "{{ url_for('static', filename='vendor/') }}"
+  }}
+</script>
+<script type="module">
+  import { mountHouse } from "{{ url_for('static', filename='house3d.js') }}";
+
+  const UNIT = {{ unit | tojson }};
+  const cards = [...document.querySelectorAll('.choice')];
+  const picks = {};     // fitting_id -> choice
+  const upgradePicks = {};  // fitting_id -> upgrade_id, for upgrades
+  const impacts = {};   // fitting_id -> /api/impact result
+  const cache = new Map();
+
+  function markActive(card) {
+    cards.forEach(c => c.classList.toggle('is-active', c === card));
+  }
+
+  const view = mountHouse(document.getElementById('house'), {
+    unit: UNIT,
+    fittings: {{ house_fittings | tojson }},
+    colorBy: 'choice',
+    initialMode: 'fittings',
+    storeKey: 'rfh-advisor-view',
+    onPick: fid => {
+      const card = cards.find(c => c.dataset.fid === fid);
+      if (!card) return;
+      markActive(card);
+      card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    },
+  });
+
+  const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const rm = n => 'RM ' + Math.round(n).toLocaleString('en-MY');
+  const kg = n => (n >= 1000 ? (n / 1000).toFixed(1) + ' t' : Math.round(n).toLocaleString('en-MY') + ' kg');
+
+  async function impactOf(fid, choice, upgrade) {
+    const key = [fid, choice, upgrade].join('|');
+    if (!cache.has(key)) {
+      const url = `/api/impact?unit=${encodeURIComponent(UNIT)}&fitting=${encodeURIComponent(fid)}&choice=${choice}`
+        + (upgrade ? `&upgrade=${encodeURIComponent(upgrade)}` : '');
+      const res = await fetch(url);
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.error || 'Could not calculate this choice');
+      cache.set(key, body);
+    }
+    return cache.get(key);
+  }
+
+  function describe(imp) {
+    const rip = imp.buyer_saving_rm - imp.buyer_credit_rm;
+    if (imp.choice === 'opt_out') {
+      return `Not installed. You get <b>${rm(imp.buyer_credit_rm)}</b> credit and skip <b>${rm(rip)}</b> of rip-out costs. `
+        + `<b>${kg(imp.carbon_avoided_kg)} CO₂e</b> never produced.`;
+    }
+    if (imp.choice === 'upgrade') {
+      const what = imp.upgrade_name
+        ? `Upgraded to <b>${esc(imp.upgrade_name)}</b>, fitted before handover`
+        : 'Your preferred version goes in first';
+      return `${what}, so nothing gets ripped out. You skip <b>${rm(rip)}</b> of rip-out costs, `
+        + `and <b>${kg(imp.carbon_avoided_kg)} CO₂e</b> of standard fitting is never made.`;
+    }
+    return 'Installed as standard.';
+  }
+
+  function renderSummary() {
+    const chosen = Object.values(impacts).filter(i => i.choice !== 'keep');
+    const sum = k => chosen.reduce((a, i) => a + i[k], 0);
+    const total = sum('buyer_saving_rm'), credit = sum('buyer_credit_rm');
+    document.getElementById('sum-total').innerHTML = `<small>RM</small> ${Math.round(total).toLocaleString('en-MY')}`;
+    document.getElementById('sum-credit').textContent = rm(credit);
+    document.getElementById('sum-ripout').textContent = rm(total - credit);
+    document.getElementById('sum-material').textContent = kg(sum('material_avoided_kg'));
+    document.getElementById('sum-carbon').textContent = kg(sum('carbon_avoided_kg')) + ' CO₂e';
+    document.getElementById('bar-text').textContent = `${rm(total)} back · ${kg(sum('carbon_avoided_kg'))} CO₂e saved`;
+    const n = chosen.length;
+    document.getElementById('changed-count').textContent = n
+      ? `${n} of ${cards.length} items changed.`
+      : 'Nothing changed yet. Everything is installed as standard.';
+  }
+
+  async function choose(card, choice, { focus = true } = {}) {
+    const fid = card.dataset.fid;
+    const pickBox = card.querySelector('.upgrade-pick');
+    if (pickBox) pickBox.hidden = choice !== 'upgrade';
+    const up = choice === 'upgrade' ? card.querySelector('.upgrade-pick input:checked') : null;
+    const upgrade = up ? up.value : undefined;
+    picks[fid] = choice;
+    if (upgrade) upgradePicks[fid] = upgrade; else delete upgradePicks[fid];
+    if (view) {
+      view.setChoice(fid, choice, up ? up.dataset.name : '', upgrade);
+      if (focus) view.focus(fid);
+    }
+    markActive(card);
+    const line = card.querySelector('.impact-line');
+    try {
+      const imp = await impactOf(fid, choice, upgrade);
+      if (picks[fid] !== choice || upgradePicks[fid] !== upgrade) return;  // a newer click won
+      impacts[fid] = imp;
+      line.innerHTML = describe(imp);
+    } catch (err) {
+      line.textContent = err.message;
+    }
+    renderSummary();
+  }
+
+  cards.forEach(card => {
+    // Picking an "Upgrade to" option counts as choosing Upgrade.
+    card.addEventListener('change', e => choose(card, e.target.name.startsWith('u-') ? 'upgrade' : e.target.value));
+    card.addEventListener('mouseenter', () => view && view.highlight(card.dataset.fid));
+    card.addEventListener('mouseleave', () => view && view.clear());
+  });
+
+  document.getElementById('reset').addEventListener('click', () => {
+    cards.forEach(card => {
+      card.querySelector('input[value="keep"]').checked = true;
+      choose(card, 'keep', { focus: false });
+    });
+    document.getElementById('result').innerHTML = '';
+  });
+
+  document.getElementById('confirm').addEventListener('click', async () => {
+    const btn = document.getElementById('confirm');
+    const out = document.getElementById('result');
+    btn.disabled = true;
+    btn.textContent = 'Saving…';
+    try {
+      const res = await fetch('/api/choices', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ unit: UNIT, choices: picks, upgrades: upgradePicks }),
+      });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.error || 'Could not save your choices');
+      out.innerHTML = `<div class="saved">Saved as buyer <b>${body.buyer_id}</b>. `
+        + `The SDP dashboard now counts ${body.totals.buyers} buyers for this home type. `
+        + `<a href="/dashboard?unit=${encodeURIComponent(UNIT)}">See it on the dashboard →</a></div>`;
+    } catch (err) {
+      out.innerHTML = '';
+      const box = document.createElement('div');
+      box.className = 'error';
+      box.textContent = err.message;
+      out.append(box);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Confirm my choices';
+    }
+  });
+</script>
+</body>
+</html>
