@@ -1,7 +1,13 @@
-{#- Neighbour Match  ·  /match?unit=T2S  ·  rendered by dashboard.match()
-    Draws the township map (positions from match_map.py) and animates each listing
-    from the owner who removed a fitting to the neighbour who took it. The KPIs come
-    from impact.reuse_summary(), the same figures as the dashboard. -#}
+{#- Neighbour Match  ·  /match?unit=T2S&as=T2S-O001  ·  rendered by dashboard.match()
+    A community page for one home type. "Browsing as" picks which (simulated)
+    neighbour you are. The composer posts an offer (POST /api/match/list) or a
+    request (/api/match/request); neighbour_match.py pairs the nearest home of the
+    same type at once. The feed (community.feed) shows every post with its chat:
+    "I'd like this" (/api/match/claim), "I have one" (/api/match/list with
+    request_id), messages (/api/match/comment) and "Mark as collected" with a
+    thank-you (/api/match/collect), which counts its carbon. The sidebar is your
+    profile, top neighbours and recent activity; the township map (positions from
+    match_map.py) is below. KPIs: impact.reuse_summary(). -#}
 <!doctype html>
 <html lang="en">
 <head>
@@ -16,6 +22,27 @@
 {% macro kg(v) -%}
   {%- if v >= 1000 -%}{{ '{:,.1f}'.format(v / 1000) }} <small>t</small>{%- else -%}{{ '{:,.0f}'.format(v) }} <small>kg</small>{%- endif -%}
 {%- endmacro %}
+{% macro avatar(p, size='') -%}
+  <span class="avatar {{ size }}" style="background: {{ p.colour }}" aria-hidden="true">{{ p.initials }}</span>
+{%- endmacro %}
+{% macro icon(fid) -%}
+  <svg class="fit-icon" aria-hidden="true"><use href="#ico-{{ 'WRD' if fid.startswith('WRD') else fid }}"/></svg>
+{%- endmacro %}
+{% macro km(v) %}{{ '{:.1f}'.format(v) }} km{% endmacro %}
+
+{# Line icons for the fittings that can be rehomed. #}
+<svg width="0" height="0" style="position: absolute" aria-hidden="true">
+  <symbol id="ico-KIT-CAB" viewBox="0 0 48 48"><g fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round">
+    <rect x="6" y="6" width="36" height="12" rx="1.5"/><path d="M24 6v12M20 11v3M28 11v3"/>
+    <rect x="6" y="24" width="36" height="18" rx="1.5"/><path d="M6 29h36M24 29v13M20 34v3M28 34v3"/></g></symbol>
+  <symbol id="ico-KIT-TOP" viewBox="0 0 48 48"><g fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round">
+    <rect x="4" y="22" width="40" height="7" rx="1.5"/><path d="M23 22v3h12v-3M33 22v-9h-6v3M9 29v13M39 29v13"/></g></symbol>
+  <symbol id="ico-WRD" viewBox="0 0 48 48"><g fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round">
+    <rect x="9" y="4" width="30" height="37" rx="1.5"/><path d="M24 4v37M21 19v6M27 19v6M12 41v3M36 41v3"/></g></symbol>
+  <symbol id="ico-LGT-DEC" viewBox="0 0 48 48"><g fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round">
+    <path d="M24 3v13M13 28a11 11 0 0 1 22 0zM20 32a4 4 0 0 0 8 0M10 38l-3 3M38 38l3 3M24 40v4"/></g></symbol>
+</svg>
+
 <div class="wrap">
   {% set page = 'match' %}{% include '_topbar.html' %}
 
@@ -23,9 +50,9 @@
     <div>
       <p class="kicker">Neighbour Match · {{ unit_types[unit] }}</p>
       <h1 class="headline">A removed wardrobe <em>fits next door exactly.</em></h1>
-      <p class="standfirst">When an owner still rips a fitting out, we offer it to a nearby owner of the
-        <b>same home type</b>. Same design means same size, so it fits with no measuring.</p>
-      <span class="sim-badge" title="Simulated listings on a fictional township map."><i aria-hidden="true">!</i>Simulated data · fictional map</span>
+      <p class="standfirst">A community board for owners of the <b>same home type</b>. Give away a fitting you
+        removed, ask for one you need, and the nearest neighbour gets it. Same design, same size, no measuring.</p>
+      <span class="sim-badge" title="Simulated neighbours, names and addresses on a fictional township."><i aria-hidden="true">!</i>Simulated neighbours · fictional township</span>
     </div>
     <div class="unit-picker">
       <span class="label" id="unit-label">Home type</span>
@@ -38,76 +65,421 @@
     </div>
   </header>
 
+  <div class="you-bar">
+    {{ avatar(you.person) }}
+    <p>Browsing as <b>{{ you.person.name }}</b><span>{{ you.person.home }} · {{ you.person.role }}</span></p>
+    <label for="as" class="you-switch">Switch neighbour
+      <select id="as">
+        {% for role, title in (('Homeowner', 'Homeowners'), ('Moving in', 'Moving in (new buyers)')) %}
+          <optgroup label="{{ title }}">
+            {% for n in neighbours if n.role == role %}
+              <option value="{{ n.id }}" {{ 'selected' if n.id == you.person.id }}>{{ n.name }} · {{ n.home }}</option>
+            {% endfor %}
+          </optgroup>
+        {% endfor %}
+      </select>
+    </label>
+  </div>
+
   <section class="results" aria-labelledby="sum-title">
     <div class="results-head">
       <h2 id="sum-title">Rehomed so far</h2>
-      <p>{{ summary.listed }} fittings listed by owners of this home type</p>
+      <p>{{ summary.neighbours }} neighbours taking part · {{ summary.listed }} fittings offered</p>
     </div>
     <div class="kpis four">
       <div class="kpi"><div class="label">Delivered to a neighbour</div>
         <div class="value">{{ summary.collected }} <small>of {{ summary.listed }}</small></div>
-        <div class="note">{{ summary.matched }} on the way, {{ summary.waiting }} waiting for a match</div></div>
+        <div class="note">{{ summary.matched }} on the way, {{ summary.waiting }} available,
+          {{ summary.asking }} neighbour{{ '' if summary.asking == 1 else 's' }} still looking</div></div>
       <div class="kpi"><div class="label">Material reused</div><div class="value">{{ kg(summary.reused_kg) }}</div>
         <div class="note">Fittings that would have gone to a skip</div></div>
       <div class="kpi"><div class="label">Carbon saved</div><div class="value">{{ kg(summary.carbon_kg) }} <small>CO₂e</small></div>
         <div class="note">After the delivery trips</div></div>
       <div class="kpi"><div class="label">Average trip</div><div class="value">{{ '{:.1f}'.format(summary.avg_km) }} <small>km</small></div>
-        <div class="note">Matches stay close to keep transport low</div></div>
+        <div class="note">Nearest neighbour first keeps transport low</div></div>
     </div>
   </section>
 
-  <div class="map-grid">
-    <section class="panel map-panel" aria-labelledby="map-title">
-      <div class="panel-head">
-        <div>
-          <h3 id="map-title">The township</h3>
-          <p class="lead">Click a route or a listing. Positions are illustrative.</p>
+  <div class="community">
+    <div class="feed-col">
+      <section class="panel composer" aria-labelledby="composer-title">
+        <h2 id="composer-title" class="visually-hidden">Post to your neighbours</h2>
+        {% set give_first = you.can_give | length > 0 %}
+        <div class="post-tabs" role="tablist" aria-label="What do you want to post?">
+          <button type="button" role="tab" id="tab-give" aria-controls="give-form" aria-selected="{{ 'true' if give_first else 'false' }}">Give something away</button>
+          <button type="button" role="tab" id="tab-ask" aria-controls="ask-form" aria-selected="{{ 'false' if give_first else 'true' }}">Ask for something</button>
         </div>
-        <button type="button" class="dl" id="play" aria-pressed="false">▶ Play deliveries</button>
-      </div>
-      <svg id="map" viewBox="0 0 1000 620" role="img"
-           aria-label="Map of a fictional township showing each listed fitting's route to its new home. The list beside the map has the same information."></svg>
-      <ul class="wlegend">
-        <li><span class="sw route-done" aria-hidden="true"></span>Delivered</li>
-        <li><span class="sw route-on" aria-hidden="true"></span>Matched, on its way</li>
-        <li><span class="sw route-wait" aria-hidden="true"></span>Waiting for a match</li>
-      </ul>
-      <div class="pick" id="pick" aria-live="polite">Pick a listing to follow its journey.</div>
-    </section>
 
-    <aside class="panel list-panel" aria-labelledby="list-title">
-      <h3 id="list-title">Listings</h3>
-      <ol class="listings" id="listings">
-        {% for i in items %}
-          <li><button type="button" class="listing" data-id="{{ i.id }}">
-            <span class="l-top"><b>{{ i.name }}</b><span class="pill {{ i.status }}">{{ {'collected': 'Delivered', 'matched': 'On its way', 'unmatched': 'Waiting'}[i.status] }}</span></span>
-            <span class="l-sub">{% if i.km is not none %}{{ '{:.1f}'.format(i.km) }} km to a neighbour{% else %}No match yet{% endif %}
-              {% if i.status == 'collected' %} · {{ '{:,.0f}'.format(i.carbon_saved_kg) }} kg CO₂e saved{% endif %}</span>
-          </button></li>
+        <form id="give-form" role="tabpanel" aria-labelledby="tab-give" {{ '' if give_first else 'hidden' }}>
+          {% if you.can_give %}
+            <label for="gf-fitting">What you removed</label>
+            <select id="gf-fitting" name="fitting">
+              {% for g in you.can_give %}<option value="{{ g.id }}">{{ g.name }}{{ ' · a neighbour is looking for one' if g.asked }}</option>{% endfor %}
+            </select>
+            <fieldset class="cond">
+              <legend>Condition</legend>
+              {% for c in conditions %}
+                <label><input type="radio" name="condition" value="{{ c }}" {{ 'checked' if c == 'Good' }}><span>{{ c }}</span></label>
+              {% endfor %}
+            </fieldset>
+            <label for="gf-note">A note for neighbours <small>(optional)</small></label>
+            <textarea id="gf-note" name="note" rows="2" maxlength="{{ max_text }}"
+                      placeholder="Colour, what's included, when it can be picked up…"></textarea>
+            <button type="submit" class="btn-primary small">Post offer</button>
+          {% else %}
+            <p class="empty-note">
+              {% if you.person.role == 'Moving in' %}You're moving in, so there's nothing to give yet. Ask for what you need instead.
+              {% else %}You haven't reported removing anything that can be rehomed{{ ', or you have offered it already' if you.gave or you.giving }}.
+                <a class="inline-link" href="/tagger?unit={{ unit }}">Add a rip-out report</a> first, then give it away here.{% endif %}
+            </p>
+          {% endif %}
+        </form>
+
+        <form id="ask-form" role="tabpanel" aria-labelledby="tab-ask" {{ 'hidden' if give_first else '' }}>
+          <label for="af-fitting">What you need</label>
+          <select id="af-fitting" name="fitting">
+            {% for f in reusable %}<option value="{{ f.id }}" {{ 'selected' if hints.waiting and f.id == hints.waiting[0] }}>{{ f.name }}{{ ' · one is available now' if f.id in hints.waiting }}</option>{% endfor %}
+          </select>
+          <label for="af-note">A note for neighbours <small>(optional)</small></label>
+          <textarea id="af-note" name="note" rows="2" maxlength="{{ max_text }}"
+                    placeholder="When you move in, which room it's for…"></textarea>
+          <button type="submit" class="btn-primary small">Post request</button>
+        </form>
+        <div id="post-msg" aria-live="polite"></div>
+      </section>
+
+      <div class="feed-tools">
+        <div class="filters" role="group" aria-label="Show">
+          {% for key, label in (('all', 'All'), ('available', 'Available'), ('wanted', 'Looking for'), ('rehomed', 'Rehomed'), ('mine', 'Mine')) %}
+            <button type="button" class="filter" data-filter="{{ key }}" aria-pressed="{{ 'true' if key == 'all' else 'false' }}">{{ label }}</button>
+          {% endfor %}
+        </div>
+        <label class="search"><span class="visually-hidden">Search posts</span>
+          <input type="search" id="search" placeholder="Search posts" autocomplete="off"></label>
+      </div>
+      <p class="feed-count" id="feed-count" aria-live="polite"></p>
+
+      <ol class="feed" id="feed" aria-label="Posts from neighbours">
+        {% for p in posts %}
+          {% set filt = 'available' if p.kind == 'offer' and p.status == 'unmatched' else ('wanted' if p.kind == 'wanted' and p.status == 'open' else ('rehomed' if p.status == 'collected' else '')) %}
+          <li class="post {{ p.kind }}" id="post-{{ p.id }}" data-id="{{ p.id }}" data-filter="{{ filt }}" data-mine="{{ 'yes' if p.mine }}"
+              data-text="{{ (p.name ~ ' ' ~ p.author.name ~ ' ' ~ p.author.home ~ ' ' ~ (p.note or '') ~ ' ' ~ (p.other.name if p.other else '')) | lower }}">
+            <article aria-labelledby="t-{{ p.id }}">
+              <header class="post-head">
+                {{ avatar(p.author) }}
+                <p class="who"><b>{{ p.author.name }}{{ ' (you)' if p.author.id == you.person.id }}</b>
+                  <span>{{ p.author.home }} · {{ p.ago }}</span></p>
+                <span class="post-tag {{ p.kind }}">{{ 'Giving away' if p.kind == 'offer' else 'Looking for' }}</span>
+              </header>
+              <div class="post-body">
+                {{ icon(p.fitting_id) }}
+                <div>
+                  <h3 id="t-{{ p.id }}">{{ p.name }}</h3>
+                  <p class="post-meta">
+                    {%- if p.kind == 'offer' %}{{ p.condition }} condition · {{ '{:,.0f}'.format(p.weight_kg) }} kg{% endif -%}
+                    {%- if p.km_from_you is not none %}{{ ' · ' if p.kind == 'offer' }}{{ km(p.km_from_you) }} from you{% endif -%}
+                  </p>
+                  {% if p.note %}<p class="post-note">{{ p.note }}</p>{% endif %}
+                </div>
+              </div>
+
+              <p class="post-status {{ p.status }}">
+                {%- if p.kind == 'offer' -%}
+                  {%- if p.status == 'unmatched' %}<b>Available</b> · waiting for a neighbour who needs one
+                  {%- elif p.status == 'matched' %}<b>Reserved for {{ 'you' if p.other.id == you.person.id else p.other.name }}</b> · {{ km(p.km) }} away · matched {{ p.when }}
+                  {%- else %}<b>Rehomed</b> with {{ 'you' if p.other.id == you.person.id else p.other.name }} {{ p.when }} · {{ '{:,.0f}'.format(p.carbon_saved_kg) }} kg CO₂e saved{% endif -%}
+                {%- else -%}
+                  {%- if p.status == 'open' %}<b>Still looking</b>
+                  {%- elif p.status == 'matched' %}<b>Found one:</b> {{ p.other.name }} is giving theirs, {{ km(p.km) }} away
+                  {%- else %}<b>Got one</b> from {{ p.other.name }}{% endif -%}
+                {%- endif -%}
+              </p>
+
+              {% if p.ask_note %}<p class="ask-note"><b>{{ p.other.name }} asked:</b> {{ p.ask_note }}</p>{% endif %}
+
+              <div class="post-actions">
+                {% if p.can.claim %}<button type="button" class="btn-primary small" data-action="claim">I'd like this</button>{% endif %}
+                {% if p.kind == 'offer' %}<button type="button" class="dl" data-map="{{ p.id }}">Show on map</button>{% endif %}
+                {% if p.kind == 'wanted' and p.listing_id %}<a class="dl" href="#post-{{ p.listing_id }}" data-open="{{ p.listing_id }}">See the offer</a>{% endif %}
+              </div>
+
+              {% if p.can.collect %}
+                <form class="collect-form">
+                  {% if p.can.thank %}
+                    <label for="th-{{ p.id }}">Picked it up? Say thanks to {{ p.author.name }} <small>(optional)</small></label>
+                    <input id="th-{{ p.id }}" name="thanks" maxlength="{{ max_text }}" placeholder="Fits perfectly, thank you!">
+                  {% else %}
+                    <p>Has {{ p.other.name }} picked it up?</p>
+                  {% endif %}
+                  <button type="submit" class="btn-primary small">Mark as collected</button>
+                </form>
+              {% endif %}
+
+              {% if p.can.offer %}
+                <form class="offer-form">
+                  <p>You removed one of these. Give it to {{ p.author.name }}?</p>
+                  <div class="offer-fields">
+                    <select name="condition" aria-label="Condition">
+                      {% for c in conditions %}<option {{ 'selected' if c == 'Good' }}>{{ c }}</option>{% endfor %}
+                    </select>
+                    <input name="note" maxlength="{{ max_text }}" placeholder="A note (optional)" aria-label="A note for {{ p.author.name }}">
+                    <button type="submit" class="btn-primary small">I have one</button>
+                  </div>
+                </form>
+              {% endif %}
+
+              {% if p.messages %}
+                <ul class="thread" aria-label="Messages">
+                  {% for msg in p.messages %}
+                    <li class="msg {{ msg.kind }}">
+                      {{ avatar(msg.author, 'small') }}
+                      <p><b>{{ msg.author.name }}</b>{% if msg.kind == 'thanks' %}<span class="thanks-tag">Thank-you note</span>{% endif %}
+                        <span class="msg-text">{{ msg.text }}</span><small>{{ msg.ago }}</small></p>
+                    </li>
+                  {% endfor %}
+                </ul>
+              {% endif %}
+              {% if p.can.comment %}
+                <form class="reply">
+                  <input name="text" maxlength="{{ max_text }}" required autocomplete="off"
+                         placeholder="{{ 'Ask ' ~ p.author.name ~ ' something' if p.author.id != you.person.id else 'Reply' }}…"
+                         aria-label="Write a message on this post">
+                  <button type="submit" class="dl">Send</button>
+                </form>
+              {% endif %}
+            </article>
+          </li>
         {% endfor %}
       </ol>
+      <p class="feed-empty" id="feed-empty" hidden>No posts match. Try another filter.</p>
+      <button type="button" class="dl more" id="more">Show more posts</button>
+    </div>
+
+    <aside class="side-col" aria-label="You and your neighbours">
+      <section class="panel me-card" aria-labelledby="me-title">
+        <div class="me-head">{{ avatar(you.person, 'large') }}
+          <div><h2 id="me-title">{{ you.person.name }}</h2><p>{{ you.person.home }}<br>{{ you.person.role }}</p></div></div>
+        <dl class="me-stats">
+          <div><dt>Given</dt><dd>{{ you.gave }}</dd></div>
+          <div><dt>Taken in</dt><dd>{{ you.took }}</dd></div>
+          <div><dt>CO₂e saved</dt><dd>{{ '{:,.0f}'.format(you.carbon_kg) }} <small>kg</small></dd></div>
+        </dl>
+        <ul class="badges" aria-label="Badges">
+          {% for b in you.badges %}
+            <li class="{{ 'earned' if b.earned }}" title="{{ b.name }}: {{ b.why }}">
+              <span aria-hidden="true">{{ '★' if b.earned else '☆' }}</span>{{ b.name }}
+              <span class="visually-hidden">{{ ', earned' if b.earned else ', not yet' }}: {{ b.why }}</span></li>
+          {% endfor %}
+        </ul>
+        {% if you.giving or you.asking %}
+          <p class="me-note">{% if you.giving %}{{ you.giving }} of your offers still open. {% endif %}{% if you.asking %}You're looking for {{ you.asking }} thing{{ '' if you.asking == 1 else 's' }}.{% endif %}</p>
+        {% endif %}
+      </section>
+
+      <section class="panel" aria-labelledby="board-title">
+        <h2 id="board-title" class="side-title">Top neighbours</h2>
+        <p class="side-lead">Carbon saved by what they gave</p>
+        <ol class="board">
+          {% for b in board %}
+            <li>{{ avatar(b.person, 'small') }}<span class="board-who"><b>{{ b.person.name }}</b><small>{{ b.gave }} given</small></span>
+              <em>{{ '{:,.0f}'.format(b.carbon_kg) }} kg</em></li>
+          {% else %}
+            <li class="muted">Nobody yet: be the first to give.</li>
+          {% endfor %}
+        </ol>
+      </section>
+
+      <section class="panel" aria-labelledby="act-title">
+        <h2 id="act-title" class="side-title">Recent activity</h2>
+        <ul class="activity">
+          {% for e in activity %}
+            <li class="{{ e.kind }}"><a href="#post-{{ e.post }}" data-open="{{ e.post }}">{{ e.text }}</a><small>{{ e.ago }}</small></li>
+          {% endfor %}
+        </ul>
+      </section>
     </aside>
   </div>
 
+  <section class="section" aria-labelledby="map-title">
+    <div class="section-head">
+      <h2 id="map-title">Around the township</h2>
+      <p>Every offer's trip from the giver to the neighbour who takes it. Click a route or a home.
+        Positions are illustrative.</p>
+    </div>
+    <div class="panel map-panel">
+      <div class="panel-head">
+        <ul class="wlegend">
+          <li><span class="sw route-done" aria-hidden="true"></span>Delivered</li>
+          <li><span class="sw route-on" aria-hidden="true"></span>Matched, on its way</li>
+          <li><span class="sw route-wait" aria-hidden="true"></span>Available</li>
+          <li><span class="sw route-ask" aria-hidden="true"></span>Neighbour looking</li>
+          <li><span class="sw route-you" aria-hidden="true"></span>You</li>
+        </ul>
+        <button type="button" class="dl" id="play" aria-pressed="false">▶ Play deliveries</button>
+      </div>
+      <svg id="map" viewBox="0 0 1000 620" role="img"
+           aria-label="Map of a fictional township showing each offered fitting's route to its new home. The posts above have the same information."></svg>
+      <div class="pick" id="pick" aria-live="polite">Pick a route or a home to follow its journey.</div>
+    </div>
+  </section>
+
   <section class="section" aria-labelledby="how-title">
     <div class="section-head">
-      <h2 id="how-title">How matching works</h2>
+      <h2 id="how-title">How it works</h2>
       <p>Simple rules, so it can run inside SDP's existing owner app or portal.</p>
     </div>
     <ol class="how">
-      <li><b>An owner lists a fitting</b>Something they're removing anyway, with photos and its condition.
+      <li><b>Give what you removed</b>Only fittings you reported removing, with their condition and a note.
         Tiles and toilets aren't listed: hacked-out tiles break, and toilets aren't reused for hygiene reasons.</li>
-      <li><b>Only the same home type</b>Same design, same measurements, so it fits with no measuring or rework.</li>
-      <li><b>Nearest owner first</b>Short trips keep transport low. Each trip's carbon
-        ({{ trip_factor }} kg CO₂e per km, both ways) is taken off the saving.</li>
+      <li><b>Same home type only</b>Same design, same measurements, so it fits with no measuring or rework.</li>
+      <li><b>Nearest neighbour first</b>A new offer goes to the nearest neighbour looking for one, or you can answer a
+        post yourself. Each trip's carbon ({{ trip_factor }} kg CO₂e per km, both ways) is taken off the saving.</li>
+      <li><b>Collect and say thanks</b>It only counts once it's picked up: then its material is reused and its
+        carbon, minus the trip, is saved.</li>
     </ol>
   </section>
 </div>
 
 <script>
+  const UNIT = {{ unit | tojson }};
+  const YOU = {{ you.person.id | tojson }};
+  const NAMES = {{ names | tojson }};
   const ITEMS = {{ items | tojson }};
+  const ASKS = {{ asks | tojson }};
   const LAYOUT = {{ layout | tojson }};
+  const YOU_AT = {{ you_at | tojson }};
+  const ITEMS_FOR = {{ wanted_fittings | tojson }};   // request id -> fitting id, for "I have one"
   const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const who = id => id === YOU ? 'you' : (NAMES[id] || id);
+  const km = v => `${Number(v).toFixed(1)} km`;
+
+  // ---- saving: every action posts, then the page reloads on the post it touched ----
+  async function post(url, body) {
+    const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const out = await res.json();
+    if (!res.ok) throw new Error(out.error || 'Something went wrong');
+    return out;
+  }
+  function reloadOn(postId, message, as = YOU) {
+    try { if (message) sessionStorage.setItem('match-msg', message); } catch (_) { /* storage blocked: no message */ }
+    // No #anchor: going to the same address with one only scrolls, it doesn't reload.
+    location.href = `?unit=${encodeURIComponent(UNIT)}&as=${encodeURIComponent(as)}`
+      + (postId ? `&focus=${encodeURIComponent(postId)}` : '');
+  }
+  function showError(after, message) {
+    const old = after.parentNode.querySelector(':scope > .error');
+    if (old) old.remove();
+    const d = document.createElement('div'); d.className = 'error'; d.setAttribute('role', 'alert'); d.textContent = message;
+    after.after(d);
+  }
+  async function run(form, step) {
+    const btn = form.querySelector('[type=submit]') || form;
+    btn.disabled = true;
+    try { await step(); } catch (err) { btn.disabled = false; showError(form, err.message); }
+  }
+
+  document.getElementById('as').addEventListener('change', e => reloadOn(null, null, e.target.value));
+
+  // ---- composer ----
+  const tabs = [...document.querySelectorAll('.post-tabs [role=tab]')];
+  tabs.forEach(t => t.addEventListener('click', () => {
+    tabs.forEach(o => { o.setAttribute('aria-selected', String(o === t)); document.getElementById(o.getAttribute('aria-controls')).hidden = o !== t; });
+  }));
+  const giveForm = document.getElementById('give-form');
+  if (giveForm.querySelector('[type=submit]')) giveForm.addEventListener('submit', e => {
+    e.preventDefault();
+    const f = new FormData(giveForm);
+    run(giveForm, async () => {
+      const { listing: l } = await post('/api/match/list', { unit: UNIT, owner: YOU, fitting: f.get('fitting'),
+                                                             condition: f.get('condition'), note: f.get('note') });
+      reloadOn(l.listing_id, l.status === 'matched'
+        ? `Posted and matched at once: ${who(l.to_owner)} was looking for ${l.name.toLowerCase()}, ${km(l.distance_km)} away. Arrange the pickup in the chat.`
+        : `Posted: your ${l.name.toLowerCase()} is up for grabs. The first neighbour of the same home type who needs one gets it.`);
+    });
+  });
+  document.getElementById('ask-form').addEventListener('submit', e => {
+    e.preventDefault();
+    const form = e.target, f = new FormData(form);
+    run(form, async () => {
+      const { request: r, listing: l } = await post('/api/match/request', { unit: UNIT, requester: YOU, fitting: f.get('fitting'), note: f.get('note') });
+      reloadOn(l ? l.listing_id : r.request_id, l
+        ? `Matched at once: ${who(l.from_owner)} is giving ${l.name.toLowerCase()}, ${km(l.distance_km)} away. Say hello in the chat.`
+        : `Posted: neighbours can see you're looking. You'll be matched when someone nearby gives one.`);
+    });
+  });
+
+  // ---- the feed: actions on a post ----
+  const feed = document.getElementById('feed');
+  feed.addEventListener('click', e => {
+    const btn = e.target.closest('[data-action=claim]');
+    if (!btn) return;
+    const id = btn.closest('.post').dataset.id;
+    run(btn, async () => {
+      const { listing: l } = await post('/api/match/claim', { listing_id: id, requester: YOU });
+      reloadOn(id, `Reserved for you: ${l.name.toLowerCase()} from ${who(l.from_owner)}, ${km(l.distance_km)} away. Arrange the pickup in the chat.`);
+    });
+  });
+  feed.addEventListener('submit', e => {
+    e.preventDefault();
+    const form = e.target, id = form.closest('.post').dataset.id, f = new FormData(form);
+    if (form.classList.contains('reply')) {
+      run(form, async () => { await post('/api/match/comment', { post_id: id, author: YOU, text: f.get('text') }); reloadOn(id); });
+    } else if (form.classList.contains('collect-form')) {
+      run(form, async () => {
+        const { listing: l } = await post('/api/match/collect', { listing_id: id, by: YOU, thanks: f.get('thanks') || '' });
+        reloadOn(id, `Collected: ${l.name.toLowerCase()} rehomed ${km(l.distance_km)} away, ${Math.round(l.carbon_saved_kg)} kg CO₂e saved after the trip.`);
+      });
+    } else if (form.classList.contains('offer-form')) {
+      const fitting = ITEMS_FOR[id];
+      run(form, async () => {
+        const { listing: l } = await post('/api/match/list', { unit: UNIT, owner: YOU, fitting, request_id: id,
+                                                               condition: f.get('condition'), note: f.get('note') });
+        reloadOn(l.listing_id, `Matched: your ${l.name.toLowerCase()} is going to ${who(l.to_owner)}, ${km(l.distance_km)} away. Arrange the pickup in the chat.`);
+      });
+    }
+  });
+
+  // ---- filters, search and paging ----
+  const posts = [...feed.children], PAGE = 10;
+  let filter = 'all', shown = PAGE;
+  const search = document.getElementById('search'), more = document.getElementById('more');
+  function render() {
+    const q = search.value.trim().toLowerCase();
+    const hits = posts.filter(li => (filter === 'all' || (filter === 'mine' ? li.dataset.mine === 'yes' : li.dataset.filter === filter))
+                                    && (!q || li.dataset.text.includes(q)));
+    posts.forEach(li => { li.hidden = true; });
+    hits.slice(0, shown).forEach(li => { li.hidden = false; });
+    more.hidden = hits.length <= shown;
+    document.getElementById('feed-empty').hidden = hits.length > 0;
+    document.getElementById('feed-count').textContent = `${hits.length} post${hits.length === 1 ? '' : 's'}`;
+  }
+  document.querySelectorAll('.filter').forEach(b => b.addEventListener('click', () => {
+    filter = b.dataset.filter; shown = PAGE;
+    document.querySelectorAll('.filter').forEach(o => o.setAttribute('aria-pressed', String(o === b)));
+    render();
+  }));
+  search.addEventListener('input', () => { shown = PAGE; render(); });
+  more.addEventListener('click', () => { shown += PAGE; render(); });
+  function openPost(id, smooth = true) {   // show a post even if a filter or the paging hides it
+    const li = document.getElementById('post-' + id);
+    if (!li) return false;
+    if (li.hidden) {
+      filter = 'all'; search.value = '';
+      document.querySelectorAll('.filter').forEach(o => o.setAttribute('aria-pressed', String(o.dataset.filter === 'all')));
+      shown = Math.max(shown, posts.indexOf(li) + 1);
+      render();
+    }
+    posts.forEach(p => p.classList.toggle('focus', p === li));
+    li.scrollIntoView({ block: 'start', behavior: smooth && !reduced ? 'smooth' : 'auto' });
+    return true;
+  }
+  document.addEventListener('click', e => {
+    const a = e.target.closest('[data-open]');
+    if (a && openPost(a.dataset.open)) e.preventDefault();
+  });
+  render();
+
+  // ---- the township map ----
   const NS = 'http://www.w3.org/2000/svg';
   const svg = document.getElementById('map');
   const el = (tag, attrs = {}, parent = svg) => {
@@ -116,34 +488,32 @@
     parent.appendChild(n);
     return n;
   };
-  const text = (x, y, s, attrs = {}) => { const t = el('text', { x, y, ...attrs }); t.textContent = s; return t; };
-  const STATUS = { collected: 'Delivered', matched: 'On its way', unmatched: 'Waiting for a match' };
+  const text = (x, y, s, attrs = {}, parent = svg) => { const t = el('text', { x, y, ...attrs }, parent); t.textContent = s; return t; };
+  const STATUS = { collected: 'Delivered', matched: 'On its way', unmatched: 'Available' };
   const terraceOn = LAYOUT.active === 'terrace';
 
-  // ---- base map ----
   el('rect', { x: 0, y: 0, width: 1000, height: 620, rx: 18, fill: '#f7f3ea' });
   el('ellipse', { cx: 870, cy: 548, rx: 112, ry: 52, fill: '#d9e5d0' });
   text(870, 553, 'Park', { class: 'map-label', 'text-anchor': 'middle' });
   el('rect', { x: 722, y: 0, width: 22, height: 620, fill: '#e2d9c8' });
   text(733, 610, 'Main road', { class: 'map-label small', 'text-anchor': 'middle' });
   for (const [a, b] of LAYOUT.cross) el('rect', { x: a + 2, y: 60, width: b - a - 4, height: 520, fill: '#ece5d7' });
-  for (const y of LAYOUT.rows) {
+  LAYOUT.rows.forEach((y, i) => {
     for (const [x0, x1] of [[74, 226], [246, 402], [422, 578], [598, 704]]) {
       el('rect', { x: x0, y: y - 6, width: x1 - x0, height: 12, rx: 3, fill: terraceOn ? '#e3d7c3' : '#ece5d8' });
     }
-  }
-  text(76, 52, 'Terrace homes', { class: 'map-label' + (terraceOn ? '' : ' faded') });
+    if (terraceOn) text(64, y + 4, String(i + 1), { class: 'map-label tiny', 'text-anchor': 'end' });   // street number
+  });
+  text(76, 52, 'Terrace homes · Jalan Harmoni 1–11', { class: 'map-label' + (terraceOn ? '' : ' faded') });
   LAYOUT.towers.forEach(([x, y], i) => {
     el('rect', { x, y, width: 30, height: 30, rx: 4, fill: terraceOn ? '#ece5d8' : '#d6c9b2', stroke: terraceOn ? 'none' : '#a99c86' });
     text(x + 15, y + 46, 'Tower ' + 'ABCDEF'[i], { class: 'map-label small' + (terraceOn ? ' faded' : ''), 'text-anchor': 'middle' });
   });
   text(785, 112, 'Condo towers', { class: 'map-label' + (terraceOn ? ' faded' : '') });
-  // scale bar: 200 units = 1 km
-  el('rect', { x: 76, y: 588, width: 200, height: 4, fill: '#8a8272' });
+  el('rect', { x: 76, y: 588, width: 200, height: 4, fill: '#8a8272' });   // scale bar: 200 units = 1 km
   text(76, 610, '0', { class: 'map-label small' });
   text(276, 610, '1 km', { class: 'map-label small', 'text-anchor': 'end' });
 
-  // ---- routes ----
   const routes = el('g'), marks = el('g'), overlay = el('g');
   function curve(a, b) {
     const mx = (a[0] + b[0]) / 2, my = (a[1] + b[1]) / 2;
@@ -157,22 +527,26 @@
     if (it.to) {
       el('path', { id: 'p-' + it.id, d: curve(it.from, it.to), class: 'route ' + it.status }, routes);
       const hit = el('path', { d: curve(it.from, it.to), class: 'route-hit', 'data-id': it.id }, routes);
-      hit.appendChild(document.createElementNS(NS, 'title')).textContent = `${it.name}: ${it.km} km, ${STATUS[it.status]}`;
+      hit.appendChild(document.createElementNS(NS, 'title')).textContent = `${it.name}: ${who(it.from_owner)} to ${who(it.to_owner)}, ${km(it.km)}`;
       el('circle', { cx: it.to[0], cy: it.to[1], r: 5, class: 'home-to ' + it.status }, marks);
     }
     const from = el('circle', { cx: it.from[0], cy: it.from[1], r: 5, class: 'home-from ' + it.status, 'data-id': it.id }, marks);
-    from.appendChild(document.createElementNS(NS, 'title')).textContent = `${it.name}: ${STATUS[it.status]}`;
+    from.appendChild(document.createElementNS(NS, 'title')).textContent = `${who(it.from_owner)}: ${it.name}, ${STATUS[it.status]}`;
   }
+  for (const a of ASKS) {   // neighbours looking for a fitting nobody has offered yet
+    const m = el('rect', { x: a.at[0] - 5, y: a.at[1] - 5, width: 10, height: 10, rx: 2, class: 'home-ask', 'data-ask': a.id }, marks);
+    m.appendChild(document.createElementNS(NS, 'title')).textContent = `${who(a.requester)} is looking for: ${a.name}`;
+  }
+  const me = el('g', { class: 'home-you' }, marks);   // where you live
+  el('circle', { cx: YOU_AT[0], cy: YOU_AT[1], r: 9 }, me);
+  text(YOU_AT[0], YOU_AT[1] - 14, 'You', { class: 'map-label small you-label', 'text-anchor': 'middle' }, me);
 
-  // ---- selecting a listing ----
   const pick = document.getElementById('pick');
   function select(id) {
     const it = byId[id];
     if (!it) return;
     overlay.innerHTML = '';
-    document.querySelectorAll('.listing').forEach(b => b.classList.toggle('on', b.dataset.id === id));
-    const btn = document.querySelector(`.listing[data-id="${id}"]`);
-    if (btn) btn.scrollIntoView({ block: 'nearest', behavior: reduced ? 'auto' : 'smooth' });
+    const open = ` <a class="inline-link" href="#post-${id}" data-open="${id}">Open the post</a>`;
     if (it.to) {
       el('path', { d: curve(it.from, it.to), class: 'route-sel' }, overlay);
       const dot = el('circle', { r: 8, class: 'van', cx: reduced ? it.to[0] : 0, cy: reduced ? it.to[1] : 0 }, overlay);
@@ -184,17 +558,23 @@
         anim.beginElement();
       }
       el('circle', { cx: it.from[0], cy: it.from[1], r: 7, class: 'sel-from' }, overlay);
-      pick.innerHTML = `<b>${it.name}</b> · ${STATUS[it.status]} · ${it.km} km from owner ${it.from_owner} to ${it.to_owner}`
-        + (it.status === 'collected' ? ` · <b>${Math.round(it.carbon_saved_kg)} kg CO₂e</b> saved` : '');
+      pick.innerHTML = `<b>${it.name}</b> · ${STATUS[it.status]} · ${km(it.km)} from ${who(it.from_owner)} to ${who(it.to_owner)}`
+        + (it.status === 'collected' ? ` · <b>${Math.round(it.carbon_saved_kg)} kg CO₂e</b> saved` : '') + open;
     } else {
       el('circle', { cx: it.from[0], cy: it.from[1], r: 9, class: 'sel-wait' }, overlay);
-      pick.innerHTML = `<b>${it.name}</b> · listed by owner ${it.from_owner} · waiting for a nearby owner of the same home type`;
+      pick.innerHTML = `<b>${it.name}</b> · offered by ${who(it.from_owner)} · available to a neighbour of the same home type` + open;
     }
   }
-  svg.addEventListener('click', e => { const id = e.target.getAttribute('data-id'); if (id) { stop(); select(id); } });
-  document.querySelectorAll('.listing').forEach(b => b.addEventListener('click', () => { stop(); select(b.dataset.id); }));
+  svg.addEventListener('click', e => {
+    const id = e.target.getAttribute('data-id'), ask = e.target.getAttribute('data-ask');
+    if (id) { stop(); select(id); }
+    else if (ask) openPost(ask);
+  });
+  document.querySelectorAll('[data-map]').forEach(b => b.addEventListener('click', () => {
+    stop(); select(b.dataset.map);
+    document.getElementById('map-title').scrollIntoView({ block: 'start', behavior: reduced ? 'auto' : 'smooth' });
+  }));
 
-  // ---- play every delivery in turn ----
   const playBtn = document.getElementById('play');
   let timer = null;
   function stop() { clearInterval(timer); timer = null; playBtn.textContent = '▶ Play deliveries'; playBtn.setAttribute('aria-pressed', 'false'); }
@@ -207,6 +587,21 @@
     playBtn.textContent = '■ Stop'; playBtn.setAttribute('aria-pressed', 'true');
     timer = setInterval(() => { if (n >= queue.length) return stop(); select(queue[n++]); }, 1700);
   });
+
+  // ---- after a reload: what just happened, on the post it touched ----
+  const focusId = new URLSearchParams(location.search).get('focus');
+  let note = null;
+  try { note = sessionStorage.getItem('match-msg'); sessionStorage.removeItem('match-msg'); } catch (_) { /* storage blocked */ }
+  if (focusId && openPost(focusId, false)) {   // straight there: a smooth scroll is cut short while the page loads
+    if (byId[focusId]) select(focusId);
+    if (note) {
+      const d = document.createElement('div'); d.className = 'saved light'; d.setAttribute('role', 'status'); d.textContent = note;
+      document.querySelector(`#post-${focusId} .post-head`).before(d);
+    }
+  } else if (note) {
+    const d = document.createElement('div'); d.className = 'saved light'; d.textContent = note;
+    document.getElementById('post-msg').append(d);
+  }
 </script>
 </body>
 </html>
