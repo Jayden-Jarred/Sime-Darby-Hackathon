@@ -1,6 +1,8 @@
-{# Shared top bar, included by every page. Set `page` to "advisor", "dashboard", "match", "simulate" or "tagger" before including. #}
+{# Shared top bar, included by every page. Set `page` to "dashboard", "advisor", "match", "simulate", "tagger"
+   or "signin" before including. The SDP dashboard is the main page: first in the menu, and where the logo goes.
+   On the right: who is signed in for the demo (`signed_in`, from dashboard.signed_in_person), or a link to sign in. #}
 <div class="topbar">
-  <a class="logo" href="{{ url_for('dashboard.advisor', unit=unit) }}" aria-label="Right-Fit Homes home">
+  <a class="logo" href="{{ url_for('dashboard.dashboard', unit=unit) }}" aria-label="Right-Fit Homes: SDP dashboard">
     <svg viewBox="0 0 32 32" aria-hidden="true">
       <rect width="32" height="32" rx="9" fill="#1f4a37"/>
       <path d="M7.5 15.6 16 8.8l8.5 6.8V24.5h-17z" fill="none" stroke="#f6f1e6" stroke-width="2.2" stroke-linejoin="round"/>
@@ -9,10 +11,18 @@
     <span>Right-Fit Homes</span>
   </a>
   <nav class="page-nav" aria-label="Pages">
-    <a href="{{ url_for('dashboard.advisor', unit=unit) }}" {% if page == 'advisor' %}aria-current="page"{% endif %}>Buyer advisor</a>
     <a href="{{ url_for('dashboard.dashboard', unit=unit) }}" {% if page == 'dashboard' %}aria-current="page"{% endif %}>SDP dashboard</a>
+    <a href="{{ url_for('dashboard.advisor', unit=unit) }}" {% if page == 'advisor' %}aria-current="page"{% endif %}>Buyer advisor</a>
     <a href="{{ url_for('dashboard.match', unit=unit) }}" {% if page == 'match' %}aria-current="page"{% endif %}>Neighbour Match</a>
     <a href="{{ url_for('dashboard.simulate', unit=unit) }}" {% if page == 'simulate' %}aria-current="page"{% endif %}>What-if</a>
     <a href="{{ url_for('dashboard.tagger_page', unit=unit) }}" {% if page == 'tagger' %}aria-current="page"{% endif %}>AI tagging</a>
   </nav>
+  {% if signed_in %}
+    <a class="who-chip" href="{{ url_for('dashboard.signin', unit=unit) }}" title="Demo sign-in: switch who you are">
+      <span class="avatar small" style="background: {{ signed_in.colour }}" aria-hidden="true">{{ signed_in.initials }}</span>
+      <span><b>{{ signed_in.name }}</b><small>{{ signed_in.role }} · demo · switch</small></span>
+    </a>
+  {% elif page != 'signin' %}
+    <a class="who-chip signin" href="{{ url_for('dashboard.signin', unit=unit) }}">Demo sign-in</a>
+  {% endif %}
 </div>
