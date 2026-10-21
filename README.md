@@ -119,7 +119,7 @@ file inside. On GitHub, the message next to each file says what it is.
 | `generate_dummy_data.py` | Makes the simulated CSV data | Member 1 |
 | `data/*.csv` | The shared data everyone reads | Member 1 |
 | `impact.py` | All cost and carbon calculations | Member 4 |
-| `dashboard.py` | SDP dashboard page + JSON API | Member 4 |
+| `dashboard.py` | Every page and API route as one Flask Blueprint, plus the demo sign-in and the request checks (other sites, size) | Member 4 |
 | `templates/dashboard.html` | Dashboard layout | Member 4 |
 | `static/house3d.js` | 3D preview of the selected home (three.js) | Member 4 |
 | `static/vendor/` | three.js r169 + its OrbitControls and RoomEnvironment helpers, bundled so the demo runs offline | — |
@@ -137,7 +137,7 @@ file inside. On GitHub, the message next to each file says what it is.
 | `templates/signin.html` | Demo sign-in screen | Member 4 |
 | `static/fonts/` | Fraunces (headlines) + Figtree (text), bundled for offline use, OFL licence | — |
 | `static/upgrades/` | A picture of each upgrade option (drawn illustrations, not product photos) | Member 1 |
-| `test_impact.py` | Checks for the calculations | Member 4 |
+| `test_impact.py` | Checks for the maths, data rules, pages, API, sign-in and security fixes (`python test_impact.py`) | Member 4 |
 | `docs/screenshots/` | The screenshots in this README (retake them after changing a page) | — |
 
 ## The data format (agree on this, don't rename columns)
@@ -360,8 +360,11 @@ out when the app restarts).
   doesn't, and the Advisor says why. The What-if already counts only the
   homes that would have ripped the item out, so it doesn't need this rule.
 - **Reuse carbon** = item carbon − delivery trip (0.25 kg CO₂e per km for a small van, both ways — an assumption). One function, `impact.reuse_carbon_kg()`, used by the dashboard, the What-if and the Neighbour Match page. It counts only once the neighbour has **collected** the item.
-- **Reuse rate** (dashboard KPI) = listings collected ÷ fittings listed on
-  Neighbour Match. Removals nobody listed don't count against it.
+- **Reuse rate** (dashboard KPI), as the proposal defines it: the share of
+  removed items rehomed = fittings a neighbour collected ÷ every reusable
+  fitting owners reported removing (listed on Neighbour Match or not). With the
+  demo data that is low (10 of 339), because most owners never list what they
+  removed; the dashboard also shows how many were offered.
 - **Upgrade mix** (`impact.upgrade_mix()`, the "Which upgrades buyers pick"
   panel on the dashboard): for each fitting, how many buyers picked each
   upgrade option, its share of that fitting's upgrades, and the margin it
@@ -373,9 +376,6 @@ out when the app restarts).
   tiles); below 30% → keep. Thresholds are in `impact.py`.
 
 ## Neighbour Match
-
-Some owners will still remove a fitting. Neighbour Match rehomes it to a
-neighbour with the same house design, so it fits without changes.
 
 Some owners will still remove a fitting. Neighbour Match is a community board
 for each home type that rehomes it to a neighbour with the same house design,
