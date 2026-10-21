@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 100">
+  <!-- Full-height sliding wardrobe: floor-to-ceiling mirrored sliding doors. Illustration, not a product photo. -->
+  <defs>
+    <linearGradient id="mirror" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#e6edf0"/><stop offset=".5" stop-color="#c2cfd6"/><stop offset="1" stop-color="#dde6ea"/>
+    </linearGradient>
+    <clipPath id="a"><rect x="12" y="7" width="46" height="82"/></clipPath>
+    <clipPath id="c"><rect x="102" y="7" width="46" height="82"/></clipPath>
+  </defs>
+  <rect width="160" height="100" fill="#f2ece2"/>
+  <rect y="90" width="160" height="10" fill="#e2d9c9"/>
+  <rect x="10" y="3" width="140" height="87" fill="#e3dccf"/>
+  <rect x="10" y="3" width="140" height="4" fill="#aaa294"/>
+  <rect x="10" y="88.5" width="140" height="1.5" fill="#aaa294"/>
+  <!-- mirrored panels -->
+  <rect x="12" y="7" width="46" height="82" fill="url(#mirror)"/>
+  <rect x="102" y="7" width="46" height="82" fill="url(#mirror)"/>
+  <g clip-path="url(#a)">
+    <rect x="18" y="20" width="22" height="28" fill="#ffffff" fill-opacity=".45"/>
+    <path d="M29 20v28M18 34h22" stroke="#c2cfd6" stroke-width="1"/>
+    <path d="M6 70L58 18M12 86L62 36" stroke="#fff" stroke-opacity=".55" stroke-width="2"/>
+  </g>
+  <g clip-path="url(#c)">
+    <path d="M96 66L148 14M104 84L152 36" stroke="#fff" stroke-opacity=".55" stroke-width="2"/>
+  </g>
+  <!-- centre panel slides in front -->
+  <rect x="55" y="7" width="2.5" height="82" fill="#000" fill-opacity=".12"/>
+  <rect x="57" y="7" width="47" height="82" fill="#f4f0e9"/>
+  <rect x="60.5" y="36" width="2" height="22" rx="1" fill="#b9b0a2"/>
+  <path d="M104 7v82" stroke="#cfc7b9" stroke-width="1"/>
+</svg>
