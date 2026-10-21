@@ -114,13 +114,20 @@
             </div>
           </fieldset>
           {% endif %}
-          <p class="impact-line" aria-live="polite"></p>
+          <div class="impact-line" aria-live="polite"></div>
         </fieldset>
       {% endfor %}
-      {% if included %}
-        <p class="included"><b>Always included:</b>
-          {% for f in included %}{{ f.name }}{{ ', ' if not loop.last }}{% endfor %} (needed before handover).</p>
-      {% endif %}
+      <div class="not-choosable">
+        {% if included %}
+          <p class="included"><b>Always installed:</b>
+            {% for f in included %}{{ f.name }}{{ ', ' if not loop.last }}{% endfor %} (needed before handover).</p>
+        {% endif %}
+        <div class="ask-sdp">
+          <b>Not sure yet: ask SDP</b>
+          <p>Anything linked to the CCC, your sales contract or the bank's valuation needs SDP's OK
+            before it can be left out or changed. Your sales advisor confirms which items those are.</p>
+        </div>
+      </div>
     </div>
 
     <aside class="summary" id="summary" aria-labelledby="summary-title">
@@ -133,6 +140,9 @@
         <div class="sum-row"><span>Rip-out costs you skip</span><b id="sum-ripout">RM 0</b></div>
         <div class="sum-row"><span>Material not wasted</span><b id="sum-material">0 kg</b></div>
         <div class="sum-row"><span>Carbon never produced</span><b id="sum-carbon">0 kg CO₂e</b></div>
+        <p class="sum-sub">For SDP</p>
+        <div class="sum-row"><span>Installation saved, after credits</span><b id="sum-sdp">RM 0</b></div>
+        <div class="sum-row"><span>Margin on upgrades</span><b id="sum-margin">RM 0</b></div>
       </div>
       <button type="button" class="btn-primary" id="confirm">Confirm my choices</button>
       <button type="button" class="btn-link" id="reset">Reset to standard</button>
@@ -198,20 +208,21 @@
     return cache.get(key);
   }
 
+  // The sentence for a choice, then its working (impact.py writes the sums).
   function describe(imp) {
-    const rip = imp.buyer_saving_rm - imp.buyer_credit_rm;
+    let line = 'Installed as standard.';
     if (imp.choice === 'opt_out') {
-      return `Not installed. You get <b>${rm(imp.buyer_credit_rm)}</b> credit and skip <b>${rm(rip)}</b> of rip-out costs. `
-        + `<b>${kg(imp.carbon_avoided_kg)} CO₂e</b> never produced.`;
-    }
-    if (imp.choice === 'upgrade') {
+      line = `Not installed. You get <b>${rm(imp.buyer_credit_rm)}</b> credit and skip <b>${rm(imp.ripout_skipped_rm)}</b> of rip-out costs.`
+        + (imp.carbon_counted ? ` <b>${kg(imp.carbon_avoided_kg)} CO₂e</b> never produced.` : '');
+    } else if (imp.choice === 'upgrade') {
       const what = imp.upgrade_name
         ? `Upgraded to <b>${esc(imp.upgrade_name)}</b>, fitted before handover`
         : 'Your preferred version goes in first';
-      return `${what}, so nothing gets ripped out. You skip <b>${rm(rip)}</b> of rip-out costs, `
-        + `and <b>${kg(imp.carbon_avoided_kg)} CO₂e</b> of standard fitting is never made.`;
+      line = `${what}, so nothing gets ripped out. You skip <b>${rm(imp.ripout_skipped_rm)}</b> of rip-out costs`
+        + (imp.carbon_counted ? `, and <b>${kg(imp.carbon_avoided_kg)} CO₂e</b> of standard fitting is never made.` : '.');
     }
-    return 'Installed as standard.';
+    const working = (imp.working || []).map(w => `<li>${esc(w)}</li>`).join('');
+    return `<p>${line}</p>` + (working ? `<ul class="working" aria-label="How it's worked out">${working}</ul>` : '');
   }
 
   function renderSummary() {
@@ -220,7 +231,9 @@
     const total = sum('buyer_saving_rm'), credit = sum('buyer_credit_rm');
     document.getElementById('sum-total').innerHTML = `<small>RM</small> ${Math.round(total).toLocaleString('en-MY')}`;
     document.getElementById('sum-credit').textContent = rm(credit);
-    document.getElementById('sum-ripout').textContent = rm(total - credit);
+    document.getElementById('sum-ripout').textContent = rm(sum('ripout_skipped_rm'));
+    document.getElementById('sum-sdp').textContent = rm(sum('sdp_saving_rm'));
+    document.getElementById('sum-margin').textContent = rm(sum('upgrade_revenue_rm'));
     document.getElementById('sum-material').textContent = kg(sum('material_avoided_kg'));
     document.getElementById('sum-carbon').textContent = kg(sum('carbon_avoided_kg')) + ' CO₂e';
     document.getElementById('bar-text').textContent = `${rm(total)} back · ${kg(sum('carbon_avoided_kg'))} CO₂e saved`;
