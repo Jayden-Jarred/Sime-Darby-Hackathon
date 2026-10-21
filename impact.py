@@ -3,6 +3,7 @@ impact.py - the Right-Fit Homes impact calculations (Member 4).
 
 Everything the other screens show comes from here:
   - load_data(), get_fitting(), get_upgrade()   read the CSVs, look up one row
+  - locked, next_id()    saves take turns; the next id to hand out
   - impact_of()          cost and carbon of ONE buyer choice (for the Advisor screen)
   - save_buyer_choices() append a buyer's Advisor choices to choices.csv
   - add_ripout_report()  append an owner's tagged report to ripouts.csv
@@ -19,6 +20,8 @@ All figures are SIMULATED: made-up homes and owners, with realistic fitting
 figures from public sources (see generate_dummy_data.py and README.md).
 """
 
+import functools
+import threading
 from pathlib import Path
 
 import pandas as pd
@@ -32,10 +35,35 @@ TRANSPORT_KGCO2E_PER_KM = 0.25   # assumption: small van, per km, one way
 CHOICES = ("keep", "opt_out", "upgrade")
 
 
-# ---- Loading ---------------------------------------------------------------
+# ---- Loading and saving ----------------------------------------------------
+# Every save reads a whole CSV, changes it and writes it back. Two at the same
+# moment would overwrite each other (and hand out the same id), so every read
+# and save of data/ takes this lock in turn. One lock is enough: the app runs
+# as one process. Re-entrant, because a reset replays saves while holding it.
+# A real database would replace this with its own transactions.
+DATA_LOCK = threading.RLock()
+
+
+def locked(fn):
+    """Decorator: run `fn` while holding DATA_LOCK."""
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        with DATA_LOCK:
+            return fn(*args, **kwargs)
+    return wrapper
+
+
+def next_id(ids, prefix):
+    """The next id after the highest one with this prefix: T2S-B101 after T2S-B100, L1000 after L999."""
+    nums = [int(i[len(prefix):]) for i in ids
+            if isinstance(i, str) and i.startswith(prefix) and i[len(prefix):].isdigit()]
+    return f"{prefix}{max(nums, default=0) + 1:03d}"
+
+
 MATCH_TEXT = ["to_owner", "condition", "note", "posted_at", "matched_at", "collected_at"]
 
 
+@locked
 def load_data(data_dir=DATA_DIR):
     """Read the seven CSV files into DataFrames."""
     data_dir = Path(data_dir)
@@ -178,6 +206,7 @@ def _working(r, f, kg, factor, ripout_rate):
     return [carbon, you, sdp]
 
 
+@locked
 def save_buyer_choices(unit_type, picks, data_dir=DATA_DIR, upgrade_picks=None):
     """
     Append one new buyer's Advisor choices to choices.csv, so the SDP
@@ -211,15 +240,14 @@ def save_buyer_choices(unit_type, picks, data_dir=DATA_DIR, upgrade_picks=None):
         if eligibility != "fixed":   # always installed, so not a choice to save
             rows.append((fid, imp["choice"], imp["upgrade_id"] or ""))
 
-    existing = data["choices"].buyer_id
-    n = existing[existing.str.startswith(unit_type + "-B")].str[-3:].astype(int).max()
-    buyer_id = f"{unit_type}-B{(0 if pd.isna(n) else n) + 1:03d}"
+    buyer_id = next_id(data["choices"].buyer_id, f"{unit_type}-B")
     new = pd.DataFrame([(buyer_id, unit_type, fid, ch, up) for fid, ch, up in rows],
                        columns=["buyer_id", "unit_type", "fitting_id", "choice", "upgrade_id"])
     new.to_csv(Path(data_dir) / "choices.csv", mode="a", header=False, index=False)
     return buyer_id
 
 
+@locked
 def add_ripout_report(unit_type, fitting_ids, note, data_dir=DATA_DIR):
     """
     Add one owner's renovation report to ripouts.csv: removed=1 for the tagged
@@ -236,9 +264,7 @@ def add_ripout_report(unit_type, fitting_ids, note, data_dir=DATA_DIR):
         raise ValueError(f"Not a fitting for {unit_type}: {', '.join(sorted(unknown))}")
     if not fitting_ids:
         raise ValueError("No fittings to record")
-    existing = data["ripouts"].owner_id
-    n = existing[existing.str.startswith(unit_type + "-O")].str[-3:].astype(int).max()
-    owner = f"{unit_type}-O{(0 if pd.isna(n) else n) + 1:03d}"
+    owner = next_id(data["ripouts"].owner_id, f"{unit_type}-O")
     clean = " ".join(str(note or "").split())[:300]   # a missing note is blank, not "None"
     rows = [(owner, unit_type, fid, int(fid in fitting_ids), clean if fid in fitting_ids else "")
             for fid in unit_fittings]
