@@ -33,6 +33,10 @@ python test_impact.py             # checks the maths
 python app.py                     # open http://127.0.0.1:5000
 ```
 
+Debug mode (error pages with the code, auto-reload) is off unless you ask for
+it: `FLASK_DEBUG=1 python app.py`. Never turn it on when other people can reach
+the app, for example with `flask run --host 0.0.0.0` to show it on phones.
+
 - `/advisor`: the buyer screen. Keep, opt out or upgrade each fitting, with the working behind every number
 - `/dashboard`: the SDP dashboard
 - `/match`: Neighbour Match community. Give away a removed fitting or ask for one, take an offer or answer a request, chat, mark it collected with a thank-you. `&as=T2S-B025` (or the "Switch neighbour" menu) picks which neighbour you are
@@ -378,8 +382,12 @@ python -c "import generate_dummy_data as g; g.write_fittings(); g.write_upgrades
 | `POST /api/match/claim` `{"listing_id", "requester"}` | "I'd like this": takes one waiting offer. Returns `{"request", "listing"}` |
 | `POST /api/match/comment` `{"post_id", "author", "text"}` | A message under an offer or request. Returns `{"message"}` |
 | `POST /api/match/collect` `{"listing_id", "by"?, "thanks"?}` | Marks a matched listing as collected; `by` must be the giver or the neighbour taking it, and only that neighbour can add `thanks` |
-| `POST /api/reset-demo` | Rebuilds all the data in `data/` (the dashboard's Reset demo data button) |
+| `POST /api/reset-demo` `{}` | Rebuilds all the data in `data/` (the dashboard's Reset demo data button). Needs a JSON body, so a form on another website can't trigger it |
 | `GET /export/<ripout-index or impact-by-fitting or upgrade-mix or choices>.csv?unit=T2S` | CSV downloads |
+
+Every POST must come from the app's own pages: one sent from another website
+gets HTTP 403. Bodies over 64 KB get HTTP 413. Saves take turns (one lock in
+`impact.py`), so two people saving at once can't overwrite each other.
 
 The match routes return HTTP 400 with an `error` message when a rule is broken
 (tiles, an owner who never reported removing it, a fitting already listed, a
