@@ -164,6 +164,23 @@ assert tagger.tag("almari bilik kecil tukar")["tags"][0]["fitting_id"] == "WRD-B
 assert tagger.tag("repaint the walls")["tags"] == []
 assert {x["fitting_id"] for x in tagger.tag("wardrobe removed")["tags"]} == {"WRD-MST", "WRD-BR2"}
 assert tagger.tag("bedroom 2 wardrobe out", fitting_ids={"WRD-MST"})["tags"] == []
+# a wardrobe with no room is ONE item: the two guesses are marked pick-one, so a report saves just one
+assert {x["pick_one"] for x in tagger.tag("wardrobe removed")["tags"]} == {"wardrobe"}
+assert all(x["pick_one"] is None for x in tagger.tag("master bedroom wardrobe removed")["tags"])
+assert all(x["pick_one"] is None for x in tagger.tag("wardrobe removed", fitting_ids={"WRD-MST"})["tags"])
+
+# the working behind a choice, and carbon only where enough owners remove the fitting
+rates = impact.ripout_rates(data, "T2S")
+hi = impact.impact_of(F, "T2S", "KIT-CAB", "opt_out", ripout_rate=rates[("T2S", "KIT-CAB")])
+assert hi["carbon_counted"] and abs(hi["carbon_avoided_kg"] - cab["weight_kg"] * cab["carbon_factor"]) < 1e-9
+assert hi["ripout_skipped_rm"] == cab["removal_cost_rm"] and len(hi["working"]) == 3
+assert f"{cab['weight_kg']:g} kg × {cab['carbon_factor']:g}" in hi["working"][0], hi["working"]
+lo = impact.impact_of(F, "T2S", "TIL-FLR", "upgrade", None, U, ripout_rate=impact.OFFER_THRESHOLD - 0.01)
+assert not lo["carbon_counted"] and lo["carbon_avoided_kg"] == 0 == lo["material_avoided_kg"], lo
+assert lo["upgrade_revenue_rm"] > 0 and "not counted" in lo["working"][0]   # the money still counts
+rare = [f for (u, f), r in rates.items() if r < impact.OFFER_THRESHOLD]
+imp = impact.choice_impacts(data, "T2S")
+assert rare and imp[imp.fitting_id.isin(rare)].carbon_avoided_kg.sum() == 0
 # the honest test set never overlaps the tuning notes or the page's examples
 import dashboard
 held = {n for n, _ in tagger.HELD_OUT}
@@ -235,6 +252,131 @@ oid2 = impact.add_ripout_report("C3R", ["KIT-CAB"], None, tmp / "data")
 rr = impact.load_data(tmp / "data")["ripouts"]
 assert "None" not in rr[rr.owner_id == oid2].note.fillna("").tolist(), rr[rr.owner_id == oid2]
 shutil.rmtree(tmp)
+
+# Neighbour Match (on a copy of the data): list, ask, match the nearest, collect
+import neighbour_match as nm
+tmp = Path(tempfile.mkdtemp()); shutil.copytree(impact.DATA_DIR, tmp / "data"); D = tmp / "data"
+d0 = impact.load_data(D)
+m0, r0 = d0["matches"], d0["requests"]
+for unit in ("T2S", "C3R"):   # never a waiting listing and an open request for the same fitting
+    waiting = set(m0.fitting_id[(m0.unit_type == unit) & (m0.status == "unmatched")])
+    asked = set(r0.fitting_id[(r0.unit_type == unit) & (r0.status == "open")])
+    assert not waiting & asked, (unit, waiting & asked)
+done = m0[m0.status == "collected"].iloc[0]   # stored distances are the map's distances
+assert done.distance_km == match_map.distance_km(done.from_owner, done.to_owner, done.unit_type)
+
+hints = nm.suggestions(d0, "T2S")
+owner, fid = hints["can_list"][0]                 # instant matches are suggested first
+assert fid in hints["open_asks"]
+l = nm.list_item("T2S", owner, fid, D)            # an owner lists what a neighbour asked for
+asks = r0[(r0.unit_type == "T2S") & (r0.fitting_id == fid) & (r0.status == "open")]
+nearest = min(asks.itertuples(), key=lambda r: (match_map.distance_km(owner, r.requester, "T2S"), r.request_id))
+assert l["status"] == "matched" and l["to_owner"] == nearest.requester, l
+r1 = impact.load_data(D)["requests"]
+assert r1.set_index("request_id").loc[nearest.request_id, "listing_id"] == l["listing_id"]
+before = impact.reuse_summary(impact.load_data(D), "T2S")
+picked = nm.collect(l["listing_id"], D)           # picked up: now its carbon counts
+after = impact.reuse_summary(impact.load_data(D), "T2S")
+assert picked["status"] == "collected" and after["collected"] == before["collected"] + 1
+assert abs(after["carbon_saved_kg"] - before["carbon_saved_kg"] - picked["carbon_saved_kg"]) < 0.1
+
+wfid = hints["waiting"][0]                        # a neighbour asks for something that's waiting
+asker = next(b for b in hints["buyers"]
+             if not ((r0.requester == b) & (r0.fitting_id == wfid) & (r0.status == "open")).any())
+req, l2 = nm.request_item("T2S", asker, wfid, D)
+assert req["status"] == "matched" and l2["to_owner"] == asker and l2["listing_id"] == req["listing_id"]
+kept = impact.load_data(D)["ripouts"]
+never_removed = kept[(kept.unit_type == "T2S") & (kept.removed == 0) & (kept.fitting_id == "KIT-CAB")].owner_id.iloc[0]
+for refused in (lambda: nm.list_item("T2S", owner, fid, D),               # listed twice
+                lambda: nm.list_item("T2S", owner, "TIL-FLR", D),         # tiles can't be rehomed
+                lambda: nm.list_item("T2S", "T2S-O999", "KIT-CAB", D),     # nobody by that id
+                lambda: nm.list_item("T2S", never_removed, "KIT-CAB", D),  # didn't report removing it
+                lambda: nm.collect(l["listing_id"], D),                   # already collected
+                lambda: nm.collect("L999", D)):
+    try:
+        refused()
+        raise AssertionError("should be refused")
+    except ValueError:
+        pass
+
+# the community: "I'd like this" takes one offer, "I have one" answers one request
+d1 = impact.load_data(D)
+m1, r1 = d1["matches"], d1["requests"]
+offer = m1[(m1.unit_type == "T2S") & (m1.status == "unmatched")].iloc[0]
+taker = next(b for b in nm.people(d1, "T2S") if b != offer.from_owner and b.startswith("T2S-B"))
+req, got = nm.claim(offer.listing_id, taker, D)
+assert got["status"] == "matched" and got["to_owner"] == taker and req["status"] == "matched"
+assert got["distance_km"] == match_map.distance_km(offer.from_owner, taker, "T2S")
+assert impact.load_data(D)["requests"].set_index("request_id").loc[req["request_id"], "listing_id"] == offer.listing_id
+open_req = r1[(r1.unit_type == "T2S") & (r1.status == "open")].iloc[0]
+rr = d1["ripouts"]
+giver = next(o for o in rr.owner_id[(rr.fitting_id == open_req.fitting_id) & (rr.removed == 1) & (rr.unit_type == "T2S")]
+             if not ((m1.from_owner == o) & (m1.fitting_id == open_req.fitting_id)).any())
+answer = nm.list_item("T2S", giver, open_req.fitting_id, D, condition="Like new", note="  Spare one  ",
+                      request_id=open_req.request_id)
+assert answer["to_owner"] == open_req.requester and answer["note"] == "Spare one" and answer["condition"] == "Like new"
+# comments and thank-yous: who may write what
+before_msgs = len(impact.load_data(D)["messages"])
+msg = nm.comment(answer["listing_id"], taker, "Is it still there?", D)
+assert msg["kind"] == "comment" and len(impact.load_data(D)["messages"]) == before_msgs + 1
+done = nm.collect(answer["listing_id"], D, by=open_req.requester, thanks="Thank you!")
+thanks = impact.load_data(D)["messages"].iloc[-1]
+assert done["status"] == "collected" and thanks.kind == "thanks" and thanks.author == open_req.requester
+c3r_person = next(iter(nm.people(d1, "C3R")))
+for refused in (lambda: nm.claim(offer.listing_id, taker, D),                        # already taken
+                lambda: nm.claim(got["listing_id"], offer.from_owner, D),            # not waiting any more
+                lambda: nm.comment(offer.listing_id, taker, "   ", D),               # empty message
+                lambda: nm.comment(offer.listing_id, taker, "x" * (nm.MAX_TEXT + 1), D),
+                lambda: nm.comment(offer.listing_id, c3r_person, "hi", D),           # not in this home type
+                lambda: nm.comment("L999", taker, "hi", D),
+                lambda: nm.collect(got["listing_id"], D, by=c3r_person),             # not the giver or taker
+                lambda: nm.collect(got["listing_id"], D, by=offer.from_owner, thanks="hi"),   # only the taker thanks
+                lambda: nm.list_item("T2S", giver, open_req.fitting_id, D, request_id="R999"),
+                lambda: nm.request_item("T2S", taker, "KIT-CAB", D, note=123)):
+    try:
+        refused()
+        raise AssertionError("should be refused")
+    except ValueError:
+        pass
+shutil.rmtree(tmp)
+
+# the seeded community follows the app's own timeline: posted, then matched, then collected
+import community
+d2 = impact.load_data()
+m2, msgs = d2["matches"], d2["messages"]
+assert (m2.matched_at[m2.status != "unmatched"] >= m2.posted_at[m2.status != "unmatched"]).all()
+assert (m2.collected_at[m2.status == "collected"] > m2.matched_at[m2.status == "collected"]).all()
+th = msgs[msgs.kind == "thanks"].merge(m2, left_on="post_id", right_on="listing_id")
+assert len(th) and (th.author == th.to_owner).all() and (th.status == "collected").all()
+for unit in ("T2S", "C3R"):
+    folks = community.everyone(d2, unit)          # simulated neighbours: no two names or homes the same
+    assert len({p["name"] for p in folks}) == len(folks) == len({p["home"] for p in folks}), unit
+    posts = community.feed(d2, unit)
+    offers = [p["id"] for p in posts if p["kind"] == "offer"]
+    assert sorted(offers) == sorted(m2.listing_id[m2.unit_type == unit]), unit   # every offer once
+    for p in posts:                              # a request shown as a post waited for its match
+        if p["kind"] == "wanted" and p["listing_id"]:
+            row = m2.set_index("listing_id").loc[p["listing_id"]]
+            r = d2["requests"].set_index("request_id").loc[p["id"]]
+            assert r.posted_at < row.matched_at, p["id"]
+board = community.leaderboard(d2, "T2S")
+assert [b["carbon_kg"] for b in board] == sorted((b["carbon_kg"] for b in board), reverse=True)
+
+# the API answers a refused step with 400 and the reason (nothing is written)
+api = Flask(__name__); api.register_blueprint(dashboard.dashboard_bp); client = api.test_client()
+for url, body in (("/api/match/list", {"unit": "T2S", "owner": owner, "fitting": "TIL-FLR"}),
+                  ("/api/match/list", {"unit": "T2S", "owner": owner, "fitting": "KIT-CAB", "condition": "Broken"}),
+                  ("/api/match/request", {"unit": "XYZ", "requester": "x", "fitting": "KIT-CAB"}),
+                  ("/api/match/claim", {"listing_id": "L999", "requester": "x"}),
+                  ("/api/match/comment", {"post_id": "L001", "author": "nobody", "text": "hi"}),
+                  ("/api/match/collect", {"listing_id": "L999"}), ("/api/match/list", [1])):
+    res = client.post(url, json=body)
+    assert res.status_code == 400 and res.json["error"], (url, res.status_code)
+page = client.get("/match?unit=T2S").data.decode()
+assert "Give something away" in page and "Top neighbours" in page and 'class="post offer' in page
+default_you = nm.suggestions(d2, "T2S")["can_list"][0][0]
+assert f'value="{default_you}" selected' in page          # browsing as an owner with something to give
+assert client.get("/match?unit=T2S&as=T2S-B001").status_code == 200
 
 t = impact.dashboard_totals(data, "T2S")
 print("All checks passed.")
