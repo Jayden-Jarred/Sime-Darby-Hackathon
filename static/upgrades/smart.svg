@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 100">
+  <!-- Smart dimmable lights: warm to cool white, dimmed from an app or the switch. Illustration, not a product photo. -->
+  <defs>
+    <linearGradient id="warm" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffc677" stop-opacity=".8"/><stop offset="1" stop-color="#ffc677" stop-opacity="0"/></linearGradient>
+    <linearGradient id="mid" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff0d2" stop-opacity=".9"/><stop offset="1" stop-color="#fff0d2" stop-opacity="0"/></linearGradient>
+    <linearGradient id="cool" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#c9ddff" stop-opacity=".85"/><stop offset="1" stop-color="#c9ddff" stop-opacity="0"/></linearGradient>
+    <linearGradient id="track" x1="0" y1="1" x2="0" y2="0"><stop offset="0" stop-color="#ffc677"/><stop offset="1" stop-color="#c9ddff"/></linearGradient>
+  </defs>
+  <rect width="160" height="100" fill="#efe8dc"/>
+  <rect width="160" height="16" fill="#e4ddd0"/>
+  <rect y="82" width="160" height="18" fill="#e0d6c5"/>
+  <path d="M18 17h12l18 69H0z" fill="url(#warm)"/>
+  <path d="M58 17h12l18 69H40z" fill="url(#mid)"/>
+  <path d="M98 17h12l18 69H80z" fill="url(#cool)"/>
+  <rect x="34" y="62" width="50" height="10" rx="3" fill="#bdb4a1"/>
+  <rect x="32" y="70" width="54" height="13" rx="3" fill="#cbc2af"/>
+  <path d="M59 70v13" stroke="#b3a993" stroke-width=".8"/>
+  <g stroke="#c9c0b2" stroke-width=".8">
+    <ellipse cx="24" cy="16" rx="6.5" ry="2" fill="#ffe6bd"/>
+    <ellipse cx="64" cy="16" rx="6.5" ry="2" fill="#fffaf0"/>
+    <ellipse cx="104" cy="16" rx="6.5" ry="2" fill="#eef4ff"/>
+  </g>
+  <!-- phone with a warm-to-cool dimmer -->
+  <rect x="126" y="40" width="26" height="50" rx="5" fill="#26292d"/>
+  <rect x="128.5" y="45" width="21" height="40" rx="2.5" fill="#33383e"/>
+  <rect x="137.5" y="50" width="3" height="30" rx="1.5" fill="url(#track)"/>
+  <circle cx="139" cy="60" r="3.6" fill="#fff" stroke="#26292d" stroke-width="1"/>
+  <circle cx="133" cy="49" r="1.6" fill="none" stroke="#ffd38f" stroke-width=".8"/>
+</svg>
