@@ -26,12 +26,15 @@ API (JSON; bad input -> 400 with an "error"):
     POST /api/match/claim    {"listing_id", "requester"}         takes one offer
     POST /api/match/comment  {"post_id", "author", "text"}       a message on a post
     POST /api/match/collect  {"listing_id", "by"?, "thanks"?}    marks it picked up
-    POST /api/reset-demo     puts every data file back to the starting demo data
+    POST /api/reset-demo     {} (JSON)  puts every data file back to the starting demo data
     GET  /export/<ripout-index|impact-by-fitting|upgrade-mix|choices>.csv?unit=T2S
+Every POST must come from the app's own pages (another site's Origin -> 403),
+and a request body is at most MAX_REQUEST_BYTES (bigger -> 413).
 """
 
 import io
 import math
+from urllib.parse import urlparse
 
 from flask import Blueprint, Response, abort, jsonify, make_response, render_template, request
 import plotly.graph_objects as go
@@ -108,9 +111,41 @@ def mix_by_fitting(mix):
             for (fid, name), rows in mix.groupby(["fitting_id", "name"], sort=False)]
 
 
+MAX_REQUEST_BYTES = 64 * 1024   # the biggest real body (a buyer's choices) is well under 1 KB
+
+
+@dashboard_bp.record_once
+def _limit_request_size(state):
+    """Any app using this blueprint refuses bodies over MAX_REQUEST_BYTES before reading them."""
+    if state.app.config.get("MAX_CONTENT_LENGTH") is None:
+        state.app.config["MAX_CONTENT_LENGTH"] = MAX_REQUEST_BYTES
+
+
+@dashboard_bp.app_errorhandler(413)
+def _too_big(_):
+    return jsonify({"error": "Too much data in one request"}), 413
+
+
+@dashboard_bp.before_request
+def _same_site_only():
+    """
+    Saves only from this app's own pages. Browsers send the page's Origin with every
+    POST, so a form on another website (say, one that resets the demo data while
+    the app is open) is refused. Tools that send no Origin, like the tests, still work.
+    """
+    origin = request.headers.get("Origin")
+    if request.method == "POST" and origin and urlparse(origin).netloc != request.host:
+        return jsonify({"error": "Requests from other websites aren't accepted"}), 403
+
+
 def _data():
     # Re-read every request so edited CSVs show up without a restart.
     return impact.load_data()
+
+
+def _known_unit(unit):
+    """True for "T2S" or "C3R". Anything else, including a list or a number from a bad body, is False."""
+    return isinstance(unit, str) and unit in UNIT_TYPES
 
 
 def _unit():
@@ -257,7 +292,7 @@ def api_choices():
     unit = body.get("unit", "")
     picks = body.get("choices", {})
     upgrade_picks = body.get("upgrades", {})
-    if unit not in UNIT_TYPES or not isinstance(picks, dict) or not isinstance(upgrade_picks, dict):
+    if not _known_unit(unit) or not isinstance(picks, dict) or not isinstance(upgrade_picks, dict):
         return jsonify({"error": "Send a known unit, a choices object and an optional upgrades object"}), 400
     try:
         buyer_id = impact.save_buyer_choices(unit, picks, upgrade_picks=upgrade_picks)
@@ -306,7 +341,7 @@ def api_tag():
     """Body: {"note": "...", "unit": "T2S"} -> tags, highlight spans."""
     body = _json_body()
     unit = body.get("unit", "T2S")
-    if unit not in UNIT_TYPES:
+    if not _known_unit(unit):
         return jsonify({"error": "Unknown unit"}), 400
     note = str(body.get("note") or "")[:500]
     return jsonify(tagger.tag(note, unit, _unit_fitting_ids(_data(), unit)))
@@ -317,7 +352,7 @@ def api_report():
     """Save a tagged note as a new rip-out report. Body: {"unit", "note", "fittings": [...]}"""
     body = _json_body()
     unit, fids = body.get("unit", ""), body.get("fittings", [])
-    if unit not in UNIT_TYPES or not isinstance(fids, list):
+    if not _known_unit(unit) or not isinstance(fids, list):
         return jsonify({"error": "Send a known unit and a list of fittings"}), 400
     try:
         owner = impact.add_ripout_report(unit, fids, body.get("note", ""))
@@ -391,7 +426,7 @@ def api_match_list():
     """
     body = _json_body()
     return _match_call(lambda: {"listing": neighbour_match.list_item(
-        body.get("unit", ""), str(body.get("owner", "")), str(body.get("fitting", "")),
+        str(body.get("unit", "")), str(body.get("owner", "")), str(body.get("fitting", "")),
         condition=str(body.get("condition") or "Good"), note=body.get("note", ""),
         request_id=_optional_id(body, "request_id"))})
 
@@ -403,7 +438,7 @@ def api_match_request():
 
     def ask():
         req, listing = neighbour_match.request_item(
-            body.get("unit", ""), str(body.get("requester", "")), str(body.get("fitting", "")),
+            str(body.get("unit", "")), str(body.get("requester", "")), str(body.get("fitting", "")),
             note=body.get("note", ""))
         return {"request": req, "listing": listing}
     return _match_call(ask)
@@ -441,7 +476,12 @@ def api_match_collect():
 
 @dashboard_bp.route("/api/reset-demo", methods=["POST"])
 def api_reset_demo():
-    """Every data file back to the starting demo data (same seed, same data every time)."""
+    """
+    Every data file back to the starting demo data (same seed, same data every time).
+    Needs a JSON body ({}): a plain form on another website can't send one.
+    """
+    if not request.is_json:
+        return jsonify({"error": "Send a JSON body ({}) to reset the demo data"}), 400
     generate_dummy_data.main()
     return jsonify({"ok": True})
 
