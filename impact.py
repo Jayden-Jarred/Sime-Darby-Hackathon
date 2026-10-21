@@ -33,19 +33,29 @@ CHOICES = ("keep", "opt_out", "upgrade")
 
 
 # ---- Loading ---------------------------------------------------------------
+MATCH_TEXT = ["to_owner", "condition", "note", "posted_at", "matched_at", "collected_at"]
+
+
 def load_data(data_dir=DATA_DIR):
-    """Read the five CSV files into DataFrames."""
+    """Read the seven CSV files into DataFrames."""
     data_dir = Path(data_dir)
+    if not (data_dir / "messages.csv").exists():
+        raise ValueError("data/ is from before the Neighbour Match community: run python generate_dummy_data.py")
     data = {
         "fittings": pd.read_csv(data_dir / "fittings.csv"),
         "upgrades": pd.read_csv(data_dir / "upgrades.csv"),
         "ripouts": pd.read_csv(data_dir / "ripouts.csv"),
-        # keep_default_na: an empty upgrade_id stays "" instead of NaN
+        # keep_default_na: an empty upgrade_id / listing_id / note stays "" instead of NaN
         "choices": pd.read_csv(data_dir / "choices.csv", keep_default_na=False),
         "matches": pd.read_csv(data_dir / "matches.csv"),
+        "requests": pd.read_csv(data_dir / "requests.csv", keep_default_na=False),
+        "messages": pd.read_csv(data_dir / "messages.csv", keep_default_na=False),
     }
     if "upgrade_id" not in data["choices"]:
         raise ValueError("data/choices.csv is from before upgrade options: run python generate_dummy_data.py")
+    m = data["matches"]   # distance_km stays a number (NaN until matched); the text columns are "" when empty
+    for col in MATCH_TEXT:
+        m[col] = m[col].fillna("").astype(str)
     return data
 
 
@@ -69,7 +79,8 @@ def get_upgrade(upgrades, unit_type, fitting_id, upgrade_id=None):
 
 
 # ---- One choice -----------------------------------------------------------
-def impact_of(fittings, unit_type, fitting_id, choice, upgrade_id=None, upgrades=None):
+def impact_of(fittings, unit_type, fitting_id, choice, upgrade_id=None, upgrades=None,
+              ripout_rate=None):
     """
     Cost and carbon of ONE buyer choice for ONE fitting.
 
@@ -86,8 +97,13 @@ def impact_of(fittings, unit_type, fitting_id, choice, upgrade_id=None, upgrades
                 Without it, the margin is the fitting's upgrade_margin_rm.
 
     Carbon counted = embodied carbon of the standard item that is no longer
-    made (weight_kg x carbon_factor). Assumes the buyer would otherwise have
-    removed it - that is why only frequently removed items are offered.
+    made (weight_kg x carbon_factor), and only when the buyer would otherwise
+    have ripped it out. We take that as true when at least OFFER_THRESHOLD of
+    owners remove the fitting (`ripout_rate`, from ripout_index). Below that,
+    the choice still saves money but counts no carbon or material
+    (`carbon_counted` False). With no `ripout_rate`, carbon is counted.
+
+    `working` = the sums behind the numbers, as short lines for the screen.
     """
     if choice not in CHOICES:
         raise ValueError(f"choice must be one of {CHOICES}, got {choice!r}")
@@ -111,19 +127,26 @@ def impact_of(fittings, unit_type, fitting_id, choice, upgrade_id=None, upgrades
         "sdp_saving_rm": 0.0,
         "buyer_saving_rm": 0.0,
         "buyer_credit_rm": 0.0,   # part of buyer_saving_rm paid as a credit
+        "ripout_skipped_rm": 0.0, # part of buyer_saving_rm: the rip-out they don't pay for
         "upgrade_revenue_rm": 0.0,
         "upgrade_id": None,       # which upgrade option (upgrade only)
         "upgrade_name": None,
+        "carbon_counted": False,
+        "working": [],
     }
     if choice == "keep":
         return result
 
-    result["material_avoided_kg"] = float(f["weight_kg"])
-    result["carbon_avoided_kg"] = float(f["weight_kg"] * f["carbon_factor"])
+    kg, factor = float(f["weight_kg"]), float(f["carbon_factor"])
+    counted = ripout_rate is None or ripout_rate >= OFFER_THRESHOLD
+    result["carbon_counted"] = counted
+    if counted:
+        result["material_avoided_kg"] = kg
+        result["carbon_avoided_kg"] = kg * factor
+    result["ripout_skipped_rm"] = float(f["removal_cost_rm"])
 
     if choice == "opt_out":
         result["sdp_saving_rm"] = float(f["install_cost_rm"] - f["credit_rm"])
-        result["buyer_saving_rm"] = float(f["credit_rm"] + f["removal_cost_rm"])
         result["buyer_credit_rm"] = float(f["credit_rm"])
     else:  # upgrade
         result["upgrade_revenue_rm"] = float(f["upgrade_margin_rm"])
@@ -131,8 +154,28 @@ def impact_of(fittings, unit_type, fitting_id, choice, upgrade_id=None, upgrades
             up = get_upgrade(upgrades, unit_type, fitting_id, upgrade_id)
             result["upgrade_revenue_rm"] = float(up["margin_rm"])
             result["upgrade_id"], result["upgrade_name"] = up["upgrade_id"], up["name"]
-        result["buyer_saving_rm"] = float(f["removal_cost_rm"])
+    result["buyer_saving_rm"] = result["buyer_credit_rm"] + result["ripout_skipped_rm"]
+    result["working"] = _working(result, f, kg, factor, ripout_rate)
     return result
+
+
+def _working(r, f, kg, factor, ripout_rate):
+    """The sums behind one choice, in words, so the screen can show its working."""
+    rm = lambda v: f"RM{v:,.0f}"
+    if r["carbon_counted"]:
+        carbon = f"Carbon: {kg:g} kg × {factor:g} kg CO₂e per kg = {r['carbon_avoided_kg']:,.0f} kg CO₂e never made"
+    else:
+        carbon = (f"Carbon: not counted. Only {ripout_rate:.0%} of owners remove this, below the "
+                  f"{OFFER_THRESHOLD:.0%} we need to say it would have been ripped out")
+    if r["choice"] == "opt_out":
+        you = (f"You: {rm(r['buyer_credit_rm'])} credit + {rm(r['ripout_skipped_rm'])} rip-out you skip "
+               f"= {rm(r['buyer_saving_rm'])}")
+        sdp = (f"SDP: {rm(f['install_cost_rm'])} installation skipped − {rm(r['buyer_credit_rm'])} credit "
+               f"= {rm(r['sdp_saving_rm'])} saved")
+    else:
+        you = f"You: {rm(r['ripout_skipped_rm'])} rip-out you skip (SDP quotes the upgrade price)"
+        sdp = f"SDP: {rm(r['upgrade_revenue_rm'])} margin on the {r['upgrade_name'] or 'upgrade'}"
+    return [carbon, you, sdp]
 
 
 def save_buyer_choices(unit_type, picks, data_dir=DATA_DIR, upgrade_picks=None):
@@ -331,12 +374,19 @@ def reuse_summary(data, unit_type=None):
 
 
 # ---- Dashboard ------------------------------------------------------------
+def ripout_rates(data, unit_type=None):
+    """{(unit_type, fitting_id): rip-out rate}, for impact_of(ripout_rate=...)."""
+    idx = ripout_index(data, unit_type)
+    return dict(zip(zip(idx.unit_type, idx.fitting_id), idx.rate))
+
+
 def choice_impacts(data, unit_type=None):
-    """impact_of() applied to every buyer choice, as one table."""
+    """impact_of() applied to every buyer choice, as one table (carbon only for often-removed fittings)."""
     c = data["choices"]
     if unit_type:
         c = c[c.unit_type == unit_type]
-    rows = [impact_of(data["fittings"], u, f, ch, up or None, data["upgrades"])
+    rates = ripout_rates(data, unit_type)
+    rows = [impact_of(data["fittings"], u, f, ch, up or None, data["upgrades"], rates.get((u, f)))
             for u, f, ch, up in zip(c.unit_type, c.fitting_id, c.choice, c.upgrade_id)]
     return pd.DataFrame(rows)
 
