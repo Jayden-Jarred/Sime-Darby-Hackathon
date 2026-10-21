@@ -2,11 +2,15 @@
 app.py - starts the Right-Fit Homes web app.
 
 Run:   python app.py      then open http://127.0.0.1:5000
+While coding, FLASK_DEBUG=1 python app.py adds error pages with the code and
+auto-reload. Never use debug mode when other people can reach the app (for
+example with flask run --host 0.0.0.0): its error pages show the code.
 
 Every page and API route lives in dashboard.py (a Flask Blueprint plugged in
 here). "/" sends you to the buyer Advisor.
 """
 
+import os
 from pathlib import Path
 
 from flask import Flask, redirect, url_for
@@ -31,4 +35,4 @@ def home():
 
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    app.run(debug=os.environ.get("FLASK_DEBUG") == "1")   # off unless asked: see the top of this file
