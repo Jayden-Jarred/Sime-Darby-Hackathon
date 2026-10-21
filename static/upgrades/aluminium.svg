@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 100">
+  <!-- Aluminium cabinets: brushed metal fronts, slim black pulls. Illustration, not a product photo. -->
+  <defs>
+    <linearGradient id="metal" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#e6eaed"/><stop offset=".55" stop-color="#c9d0d5"/><stop offset="1" stop-color="#aeb7be"/>
+    </linearGradient>
+    <pattern id="brush" width="3" height="10" patternUnits="userSpaceOnUse">
+      <path d="M1 0v10" stroke="#ffffff" stroke-opacity=".35" stroke-width=".5"/>
+      <path d="M2.4 0v10" stroke="#8d969d" stroke-opacity=".18" stroke-width=".4"/>
+    </pattern>
+  </defs>
+  <rect width="160" height="100" fill="#f2ece2"/>
+  <rect y="86" width="160" height="14" fill="#e2d9c9"/>
+  <rect x="12" y="36" width="136" height="13" fill="#e8e1d3"/>
+  <!-- wall units -->
+  <rect x="14" y="8" width="134" height="28" fill="url(#metal)"/>
+  <rect x="14" y="8" width="134" height="28" fill="url(#brush)"/>
+  <path d="M46.5 8v28M79 8v28M111.5 8v28" stroke="#88929a" stroke-width=".9"/>
+  <rect x="14" y="35" width="134" height="1.2" fill="#9aa3aa"/>
+  <rect x="24" y="31.5" width="12" height="1.4" rx=".7" fill="#25282b"/>
+  <rect x="57" y="31.5" width="12" height="1.4" rx=".7" fill="#25282b"/>
+  <rect x="89.5" y="31.5" width="12" height="1.4" rx=".7" fill="#25282b"/>
+  <rect x="122" y="31.5" width="12" height="1.4" rx=".7" fill="#25282b"/>
+  <!-- worktop -->
+  <rect x="10" y="49" width="140" height="3.4" fill="#d9d4cb"/>
+  <rect x="10" y="52.4" width="140" height="1.2" fill="#c3bcb1"/>
+  <!-- base units -->
+  <rect x="14" y="53.6" width="134" height="30.4" fill="url(#metal)"/>
+  <rect x="14" y="53.6" width="134" height="30.4" fill="url(#brush)"/>
+  <path d="M46.5 53.6v30.4M79 53.6v30.4M111.5 53.6v30.4M14 63.8h32.5M14 73.9h32.5" stroke="#88929a" stroke-width=".9"/>
+  <rect x="24" y="56.5" width="12" height="1.4" rx=".7" fill="#25282b"/>
+  <rect x="24" y="66.6" width="12" height="1.4" rx=".7" fill="#25282b"/>
+  <rect x="24" y="76.7" width="12" height="1.4" rx=".7" fill="#25282b"/>
+  <rect x="57" y="56.5" width="12" height="1.4" rx=".7" fill="#25282b"/>
+  <rect x="89.5" y="56.5" width="12" height="1.4" rx=".7" fill="#25282b"/>
+  <rect x="122" y="56.5" width="12" height="1.4" rx=".7" fill="#25282b"/>
+  <rect x="14" y="84" width="134" height="2" fill="#5d646a"/>
+</svg>
