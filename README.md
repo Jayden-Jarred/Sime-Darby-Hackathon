@@ -7,6 +7,8 @@ and shows Sime Darby Property (SDP) the waste, carbon and money saved.
 A demo for the Sime Darby Property hackathon (Planet track: circular economy
 and waste).
 
+![The SDP dashboard: the most ripped-out fitting, with the selected home in 3D](docs/screenshots/dashboard.png)
+
 | Page | What it does |
 | --- | --- |
 | Demo sign-in | Pick who you are: SDP staff, a homeowner or a buyer moving in. No password (simulated people) |
@@ -24,6 +26,57 @@ made up. The fittings' weights, carbon factors and
 prices are realistic estimates from public sources: see
 [Where the numbers come from](#where-the-numbers-come-from). There is no survey
 data.
+
+## A quick tour
+
+Screenshots of each page with the demo data, taken at 1280 px wide. See
+[Run it](#run-it) to open the app yourself.
+
+**1. Demo sign-in** (`/`, then `/signin`). Pick SDP staff, a homeowner or a buyer
+moving in. No password: everyone is simulated. A suggested person per home type
+makes the demo quick.
+
+![Demo sign-in: three roles, each with suggested people](docs/screenshots/signin.png)
+
+**2. SDP dashboard** (`/dashboard`), the main page. The top (shown above) names
+the fitting most owners rip out and shows the home in 3D. Further down, the
+rip-out index says what to stop installing at the next launch: red is stop
+installing, amber is offer as an opt-out, green is keep.
+
+![What owners rip out: the rip-out index chart and the advice for each fitting](docs/screenshots/dashboard-ripouts.png)
+
+**3. Buyer advisor** (`/advisor`). Here a buyer opts out of the kitchen cabinets
+and upgrades the kitchen top to quartz. Each choice shows the sum behind its
+numbers (carbon, what the buyer saves, what SDP saves), and the box on the right
+adds them up.
+
+![Buyer advisor: opt out of the cabinets, upgrade the kitchen top, with the working and the total](docs/screenshots/advisor.png)
+
+**4. Neighbour Match** (`/match`), signed in as homeowner Aisyah A. Give away a
+fitting you removed or ask for one; the sidebar shows your profile, badges and
+the top neighbours.
+
+![Neighbour Match: signed in, the community numbers, the composer and the sidebar](docs/screenshots/match.png)
+
+The feed: each post shows who, where, how far from you, its status and the
+chat. Here the kitchen top was rehomed, and the neighbour left a thank-you note.
+
+![A rehomed post with the pickup chat and a thank-you note](docs/screenshots/match-feed.png)
+
+The township map: every trip from the giver to the neighbour taking it. Click a
+route to follow it, or Play deliveries.
+
+![The township map with delivery routes and your home](docs/screenshots/match-map.png)
+
+**5. What-if** (`/simulate`). Move the sliders to project a whole launch: waste
+avoided, carbon, SDP's gain after its running cost, and when it pays for itself.
+
+![What-if: sliders on the left, the projected launch on the right](docs/screenshots/whatif.png)
+
+**6. AI tagging** (`/tagger`). A messy note in Malay and English is sorted into
+fittings, with how sure the tagger is, and can be saved as a rip-out report.
+
+![AI tagging: a Malay note sorted into kitchen cabinets and kitchen top](docs/screenshots/tagger.png)
 
 ## Run it
 
@@ -82,6 +135,7 @@ file inside. On GitHub, the message next to each file says what it is.
 | `static/fonts/` | Fraunces (headlines) + Figtree (text), bundled for offline use, OFL licence | — |
 | `static/upgrades/` | A picture of each upgrade option (drawn illustrations, not product photos) | Member 1 |
 | `test_impact.py` | Checks for the calculations | Member 4 |
+| `docs/screenshots/` | The screenshots in this README (retake them after changing a page) | — |
 
 ## The data format (agree on this, don't rename columns)
 
