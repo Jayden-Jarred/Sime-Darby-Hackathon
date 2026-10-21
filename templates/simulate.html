@@ -1,0 +1,207 @@
+{#- What-if  ·  /simulate?unit=T2S  ·  rendered by dashboard.simulate()
+    Sliders (ranges from dashboard.SIM_SLIDERS, defaults from impact.SIM_DEFAULTS)
+    project a whole launch. Every change fetches /api/simulate (impact.simulate) and
+    redraws the results: waste avoided, carbon, SDP's gain, payback, per fitting. -#}
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Right-Fit Homes · What-if</title>
+  <link rel="preload" href="{{ url_for('static', filename='fonts/fraunces.woff2') }}" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="{{ url_for('static', filename='fonts/figtree.woff2') }}" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
+</head>
+<body style="{{ advice_css }}">
+<div class="wrap">
+  {% set page = 'simulate' %}{% include '_topbar.html' %}
+
+  <header class="page-head">
+    <div>
+      <p class="kicker">What-if · {{ unit_types[unit] }}</p>
+      <h1 class="headline" id="sim-headline">What would Right-Fit do for <em>a whole launch?</em></h1>
+      <p class="standfirst">Move the sliders to project one launch, using this home type's rip-out rates.
+        Every number updates as you drag.</p>
+      <span class="sim-badge" title="A projection from simulated data and stated assumptions."><i aria-hidden="true">!</i>Projection from simulated data</span>
+    </div>
+    <div class="unit-picker">
+      <span class="label" id="unit-label">Home type</span>
+      <nav class="tabs" aria-labelledby="unit-label">
+        {% for code, label in unit_types.items() %}
+          <a href="?unit={{ code }}" data-unit="{{ code }}" class="{{ 'on' if code == unit else '' }}"
+             {% if code == unit %}aria-current="page"{% endif %}>{{ label }}</a>
+        {% endfor %}
+      </nav>
+    </div>
+  </header>
+
+  <div class="sim-grid">
+    <section class="panel controls" aria-labelledby="ctl-title">
+      <h2 id="ctl-title" class="panel-title">Your assumptions</h2>
+      <div class="presets" role="group" aria-label="Launch size presets">
+        <button type="button" class="ex" data-homes="100">Pilot · 100 homes</button>
+        <button type="button" class="ex" data-homes="500">Launch · 500</button>
+        <button type="button" class="ex" data-homes="2000">Township · 2,000</button>
+      </div>
+
+      {# Ranges come from dashboard.SIM_SLIDERS, the same limits the API clamps to. #}
+      {% macro slider(id, label, help, fmt) -%}
+      {% set lo, hi, step = sliders[id] %}
+      <div class="ctl">
+        <div class="ctl-top"><label for="{{ id }}">{{ label }}</label><output id="{{ id }}-out" for="{{ id }}" data-fmt="{{ fmt }}"></output></div>
+        <input type="range" id="{{ id }}" name="{{ id }}" min="{{ lo }}" max="{{ hi }}" step="{{ step }}" value="{{ params[id] }}">
+        <p class="ctl-help">{{ help }}</p>
+      </div>
+      {%- endmacro %}
+      {{ slider('homes', 'Homes in the launch', 'How many homes of this type SDP hands over.', 'int') }}
+      {{ slider('uptake', 'Buyers who choose before handover', 'Of buyers who would rip a fitting out, the share who opt out or upgrade instead.', 'pct') }}
+      {{ slider('upgrade_share', 'Of those, buyers who upgrade', 'The rest opt out for a credit. Tiles can only be upgraded.', 'pct') }}
+      {{ slider('credit_mult', 'Credit size', "Credit for opting out, compared with today's credit in the data. 0% = no credit.", 'mult') }}
+      {{ slider('match_rate', 'Removed fittings rehomed', 'Of fittings still ripped out, the share Neighbour Match finds a new home for.', 'pct') }}
+      {{ slider('programme_cost', 'Cost to run Right-Fit', "SDP's cost for this launch: software, staff, logistics. An assumption.", 'rm') }}
+      <button type="button" class="btn-link dark" id="reset-sim">Reset to defaults</button>
+    </section>
+
+    <section class="sim-results" aria-live="polite" aria-labelledby="res-title">
+      <div class="results tight">
+        <div class="results-head">
+          <h2 id="res-title">This launch, projected</h2>
+          <p id="res-sub"></p>
+        </div>
+        <p class="sim-big"><span id="r-avoided"></span><small> of fitting waste avoided</small></p>
+        <div class="kpis four">
+          <div class="kpi"><div class="label">Carbon never released</div><div class="value" id="r-carbon"></div></div>
+          <div class="kpi"><div class="label">SDP gains, after running cost</div><div class="value" id="r-net"></div></div>
+          <div class="kpi"><div class="label">Buyers save in total</div><div class="value" id="r-buyers"></div></div>
+          <div class="kpi"><div class="label">Pays for itself after</div><div class="value" id="r-payback"></div></div>
+        </div>
+      </div>
+
+      <div class="panel waste">
+        <h3>Where the ripped-out fittings go</h3>
+        <p class="lead">Both bars use the same scale. Hover a segment for its weight.</p>
+        <div class="wbar-row">
+          <span class="wbar-label">Without Right-Fit</span>
+          <div class="wbar"><span class="seg skip" id="w-base" style="width:100%"></span></div>
+          <span class="wbar-val" id="w-base-v"></span>
+        </div>
+        <div class="wbar-row">
+          <span class="wbar-label">With Right-Fit</span>
+          <div class="wbar">
+            <span class="seg prevent" id="w-prev"></span><span class="seg reuse" id="w-reuse"></span><span class="seg skip" id="w-waste"></span>
+          </div>
+          <span class="wbar-val" id="w-waste-v"></span>
+        </div>
+        <ul class="wlegend">
+          <li><span class="sw prevent" aria-hidden="true"></span>Never installed <b id="l-prev"></b></li>
+          <li><span class="sw reuse" aria-hidden="true"></span>Rehomed next door <b id="l-reuse"></b></li>
+          <li><span class="sw skip" aria-hidden="true"></span>Still to the skip <b id="l-waste"></b></li>
+        </ul>
+      </div>
+    </section>
+  </div>
+
+  <section class="section" aria-labelledby="fit-title">
+    <div class="section-head">
+      <h2 id="fit-title">Fitting by fitting</h2>
+      <p>Homes are rounded. Tiles can't be rehomed once hacked out, and toilets aren't offered for hygiene reasons.</p>
+    </div>
+    <div class="panel">
+      <table>
+        <thead><tr><th>Fitting</th><th class="num">Would rip out</th><th class="num">Opt out</th><th class="num">Upgrade</th>
+          <th class="num">Rehomed</th><th class="num">Waste avoided</th></tr></thead>
+        <tbody id="fit-rows"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="method" aria-labelledby="method-title">
+    <h2 id="method-title">How the projection works</h2>
+    <ul>
+      <li>Homes that would rip a fitting out = homes × that fitting's rip-out rate for this home type.</li>
+      <li>Of those, the uptake share choose before handover: the fitting is never made, so its weight and carbon are avoided.</li>
+      <li>SDP gains = installation it skips minus credits paid, plus its margin on upgrades, minus the running cost.</li>
+      <li>Rehomed fittings count their carbon, minus a {{ trip }} km delivery trip each way ({{ transport }} kg CO₂e per km).</li>
+      <li>"Pays for itself after" = running cost ÷ SDP's gain per home.</li>
+    </ul>
+  </section>
+</div>
+
+<script>
+  let UNIT = {{ unit | tojson }};
+  const DEFAULTS = {{ defaults | tojson }};   // impact.SIM_DEFAULTS
+  const ids = Object.keys(DEFAULTS);
+  const inputs = Object.fromEntries(ids.map(k => [k, document.getElementById(k)]));
+  const nf = n => Math.round(n).toLocaleString('en-MY');
+  const tonnes = kg => kg >= 1000 ? (kg / 1000).toLocaleString('en-MY', { maximumFractionDigits: kg >= 100000 ? 0 : 1 }) + ' t' : nf(kg) + ' kg';
+  const rm = n => (n < 0 ? '−RM ' : 'RM ') + nf(Math.abs(n));
+  const fmt = {
+    int: v => nf(v), pct: v => Math.round(v * 100) + '%', mult: v => Math.round(v * 100) + '% of today', rm: v => rm(v),
+  };
+  const $ = id => document.getElementById(id);
+
+  function showOutputs() {
+    ids.forEach(k => { const o = $(k + '-out'); o.textContent = fmt[o.dataset.fmt](+inputs[k].value); });
+  }
+
+  function params() {
+    return new URLSearchParams({ unit: UNIT, ...Object.fromEntries(ids.map(k => [k, inputs[k].value])) });
+  }
+
+  function render(res) {
+    const t = res.totals, homes = +inputs.homes.value;
+    $('sim-headline').innerHTML = `A ${nf(homes)}-home launch keeps <em>${tonnes(t.prevented_kg + t.reused_kg)}</em> of fittings out of skips.`;
+    $('res-sub').textContent = `${nf(homes)} homes · ${Math.round(+inputs.uptake.value * 100)}% of would-be rip-outs choose first`;
+    $('r-avoided').textContent = Math.round(t.waste_avoided_share * 100) + '%';
+    $('r-carbon').innerHTML = tonnes(t.carbon_total_kg).replace(/ (t|kg)$/, ' <small>$1 CO₂e</small>');
+    $('r-net').innerHTML = rm(t.sdp_net_rm).replace('RM ', '<small>RM</small> ');
+    $('r-net').classList.toggle('neg', t.sdp_net_rm < 0);
+    $('r-buyers').innerHTML = rm(t.buyer_saving_rm).replace('RM ', '<small>RM</small> ');
+    $('r-payback').innerHTML = t.payback_homes == null ? '<small>never at these settings</small>'
+      : `${nf(t.payback_homes)} <small>homes</small>`;
+
+    const base = t.baseline_kg || 1, pc = kg => (100 * kg / base).toFixed(2) + '%';
+    $('w-base-v').textContent = tonnes(t.baseline_kg);
+    $('w-waste-v').textContent = tonnes(t.wasted_kg) + ' skipped';
+    [['w-prev', t.prevented_kg, 'Never installed'], ['w-reuse', t.reused_kg, 'Rehomed'], ['w-waste', t.wasted_kg, 'Still skipped']]
+      .forEach(([id, kg, label]) => { const el = $(id); el.style.width = pc(kg); el.title = `${label}: ${tonnes(kg)}`; });
+    $('w-base').title = `Ripped out and skipped: ${tonnes(t.baseline_kg)}`;
+    $('l-prev').textContent = tonnes(t.prevented_kg);
+    $('l-reuse').textContent = tonnes(t.reused_kg);
+    $('l-waste').textContent = tonnes(t.wasted_kg);
+
+    $('fit-rows').innerHTML = res.fittings.map(f => `<tr>
+      <td>${f.name}</td><td class="num">${nf(f.would_remove)}</td><td class="num">${nf(f.opted_out)}</td>
+      <td class="num">${nf(f.upgraded)}</td><td class="num">${nf(f.rehomed)}</td>
+      <td class="num">${tonnes(f.prevented_kg + f.reused_kg)}</td></tr>`).join('');
+
+    document.querySelectorAll('.tabs a[data-unit]').forEach(a => {
+      const p = params(); p.set('unit', a.dataset.unit); a.href = '?' + p.toString();
+    });
+    history.replaceState(null, '', '?' + params().toString());
+  }
+
+  let timer = null, seq = 0;
+  async function update() {
+    showOutputs();
+    clearTimeout(timer);
+    timer = setTimeout(async () => {
+      const my = ++seq;
+      try {
+        const res = await fetch('/api/simulate?' + params().toString()).then(r => r.json());
+        if (my === seq) render(res);
+      } catch (e) { $('res-sub').textContent = 'Could not reach the app. Is it running?'; }
+    }, 90);
+  }
+
+  ids.forEach(k => inputs[k].addEventListener('input', update));
+  document.querySelectorAll('[data-homes]').forEach(b => b.addEventListener('click', () => {
+    inputs.homes.value = b.dataset.homes; update();
+  }));
+  $('reset-sim').addEventListener('click', () => { ids.forEach(k => { inputs[k].value = DEFAULTS[k]; }); update(); });
+
+  showOutputs();
+  render({{ result | tojson }});
+</script>
+</body>
+</html>
