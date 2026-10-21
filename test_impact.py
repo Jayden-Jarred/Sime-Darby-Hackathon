@@ -378,6 +378,39 @@ default_you = nm.suggestions(d2, "T2S")["can_list"][0][0]
 assert f'value="{default_you}" selected' in page          # browsing as an owner with something to give
 assert client.get("/match?unit=T2S&as=T2S-B001").status_code == 200
 
+# saves at the same moment take turns: nothing lost, no id handed out twice (on a copy of the data)
+import threading
+tmp = Path(tempfile.mkdtemp()); shutil.copytree(impact.DATA_DIR, tmp / "data"); D = tmp / "data"
+d3 = impact.load_data(D)
+post_id = d3["matches"].listing_id.iloc[0]
+writer = next(p for p in nm.people(d3, d3["matches"].unit_type.iloc[0]) if "-B" in p)
+msgs_before, buyers_before = len(d3["messages"]), set(d3["choices"].buyer_id)
+jobs = [threading.Thread(target=nm.comment, args=(post_id, writer, f"at once {i}", D)) for i in range(20)]
+jobs += [threading.Thread(target=impact.save_buyer_choices, args=("T2S", {"KIT-CAB": "opt_out"}, D)) for _ in range(10)]
+[j.start() for j in jobs]; [j.join() for j in jobs]
+d4 = impact.load_data(D)
+assert len(d4["messages"]) == msgs_before + 20 and not d4["messages"].message_id.duplicated().any()
+new_buyers = d4["choices"][~d4["choices"].buyer_id.isin(buyers_before)].groupby("buyer_id").size()
+assert len(new_buyers) == 10 and (new_buyers == 6).all(), new_buyers
+shutil.rmtree(tmp)
+assert impact.next_id(["T2S-B998", "T2S-B999"], "T2S-B") == "T2S-B1000"   # ids keep counting past 999
+assert impact.next_id(["T2S-B1000", "T2S-B999", "C3R-B5000", "T2S-Bx"], "T2S-B") == "T2S-B1001"
+
+# requests from other websites, wrong types and oversized bodies are refused (nothing is written)
+res = client.post("/api/reset-demo", data="x=1", content_type="application/x-www-form-urlencoded")
+assert res.status_code == 400, res.status_code           # a plain form can't reset the demo data
+res = client.post("/api/reset-demo", json={}, headers={"Origin": "https://evil.example"})
+assert res.status_code == 403, res.status_code           # nor can another website's page
+res = client.post("/api/match/comment", json={"post_id": "L001", "author": "x", "text": "hi"},
+                  headers={"Origin": "http://localhost"})
+assert res.status_code == 400                             # same site: reaches the route (refused there)
+for url in ("/api/choices", "/api/tag", "/api/report", "/api/match/list", "/api/match/request"):
+    res = client.post(url, json={"unit": ["T2S"], "choices": {}, "fittings": [], "owner": "x", "requester": "x",
+                                 "fitting": "KIT-CAB"})
+    assert res.status_code == 400 and res.json["error"], (url, res.status_code)
+res = client.post("/api/match/comment", json={"post_id": "L001", "author": "x", "text": "x" * 100_000})
+assert res.status_code == 413 and res.json["error"], res.status_code
+
 t = impact.dashboard_totals(data, "T2S")
 print("All checks passed.")
 print({k: (round(v) if isinstance(v, float) else v) for k, v in t.items() if k != "reuse"})
