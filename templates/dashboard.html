@@ -1,0 +1,315 @@
+{#- SDP dashboard  ·  /dashboard?unit=T2S  ·  rendered by dashboard.dashboard()
+    The 3D home coloured by advice (static/house3d.js), the KPI cards
+    (impact.dashboard_totals), the rip-out chart (built in dashboard.ripout_chart),
+    the "what to change next launch" table, what buyers chose, which upgrades they
+    pick, and how the numbers are worked out. Click a bar or row to see it in 3D. -#}
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Right-Fit Homes · SDP Dashboard</title>
+  <link rel="preload" href="{{ url_for('static', filename='fonts/fraunces.woff2') }}" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="{{ url_for('static', filename='fonts/figtree.woff2') }}" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
+  <script src="{{ url_for('static', filename='plotly.min.js') }}"></script>
+</head>
+<body style="{{ advice_css }}">
+{% macro kg(v) -%}
+  {%- if v >= 1000 -%}{{ '{:,.1f}'.format(v / 1000) }} <small>t</small>
+  {%- else -%}{{ '{:,.0f}'.format(v) }} <small>kg</small>{%- endif -%}
+{%- endmacro %}
+{% macro kg_text(v) -%}
+  {%- if v >= 1000 -%}{{ '{:,.1f}'.format(v / 1000) }} t{%- else -%}{{ '{:,.0f}'.format(v) }} kg{%- endif -%}
+{%- endmacro %}
+<div class="wrap">
+  {% set page = 'dashboard' %}{% include '_topbar.html' %}
+
+  <header class="page-head">
+    <div>
+      <p class="kicker">SDP dashboard · {{ unit_types[unit] }}</p>
+      {% if story %}
+        <h1 class="headline">{{ story.lead }} <em>{{ story.emph }}</em> {{ story.tail }}</h1>
+      {% else %}
+        <h1 class="headline">What owners rip out, and what it costs.</h1>
+      {% endif %}
+      <p class="standfirst">Letting {{ totals.buyers }} buyers opt out or upgrade kept
+        <b>{{ kg_text(totals.material_avoided_kg) }}</b> of fittings out of skips and
+        <b>{{ kg_text(totals.carbon_avoided_kg) }} CO₂e</b> out of the air.</p>
+      <span class="sim-badge" title="Made-up homes and owners. Fitting weights, carbon factors and prices are estimates from public sources, not SDP data.">
+        <i aria-hidden="true">!</i>Simulated data</span>
+    </div>
+    <div class="unit-picker">
+      <span class="label" id="unit-label">Unit type (updates the whole page)</span>
+      <nav class="tabs" aria-labelledby="unit-label">
+        {% for code, label in unit_types.items() %}
+          <a href="?unit={{ code }}" class="{{ 'on' if code == unit else '' }}"
+             {% if code == unit %}aria-current="page"{% endif %}>{{ label }}</a>
+        {% endfor %}
+      </nav>
+    </div>
+  </header>
+
+  <section class="house" id="house" data-view="exterior" aria-label="3D preview of the selected home">
+    <div class="house-canvas" role="img"
+         aria-label="3D model of a {{ unit_info.title }}. Switch to Fittings to see each fitting coloured by rip-out advice."></div>
+    <div class="house-fallback">The 3D preview needs WebGL, which this browser has turned off. The tables below show the same data.</div>
+    <div class="house-help">Drag to rotate · scroll to zoom</div>
+    <div class="house-card">
+      <div class="eyebrow">Selected home</div>
+      <h2>{{ unit_info.title }}</h2>
+      <ul class="facts">
+        {% for f in unit_info.facts %}<li>{{ f }}</li>{% endfor %}
+      </ul>
+      <div class="seg" role="group" aria-label="3D view">
+        <button type="button" data-view-btn="exterior" aria-pressed="true">Exterior</button>
+        <button type="button" data-view-btn="fittings" aria-pressed="false">Fittings</button>
+      </div>
+      <div class="floor-pick" data-floor-picker hidden>
+        <span class="floor-label" id="floor-label">Floor</span>
+        <div class="seg" role="group" aria-labelledby="floor-label"></div>
+      </div>
+      <p class="view-hint">Look inside to see all {{ house_fittings | length }} fittings, coloured by what SDP should do next. Click one to zoom in.</p>
+    </div>
+    <div class="house-legend" aria-label="Colour key">
+      <span class="chip stop"><i aria-hidden="true">✕</i>Stop installing</span>
+      <span class="chip offer"><i aria-hidden="true">!</i>Offer as opt-out / upgrade</span>
+      <span class="chip keep"><i aria-hidden="true">✓</i>Keep</span>
+    </div>
+  </section>
+
+  <section class="results" aria-labelledby="results-title">
+    <div class="results-head">
+      <h2 id="results-title">What Right-Fit saved here</h2>
+      <p>Simulated figures for the demo, not SDP performance data</p>
+    </div>
+    <div class="kpis">
+      <div class="kpi lead-kpi">
+        <div class="label">Carbon never released</div>
+        <div class="value">{{ kg(totals.carbon_avoided_kg) }} <small>CO₂e</small></div>
+        <div class="note">From buyer choices and reused fittings, after delivery trips</div>
+      </div>
+      <div class="kpi">
+        <div class="label">Kept out of skips</div>
+        <div class="value">{{ kg(totals.material_avoided_kg) }}</div>
+        <div class="note">{{ totals.items_not_installed }} fittings never installed or swapped for an upgrade</div>
+      </div>
+      <div class="kpi">
+        <div class="label">Saved by SDP</div>
+        <div class="value"><small>RM</small> {{ '{:,.0f}'.format(totals.sdp_saving_rm) }}</div>
+        <div class="note">Installation skipped, after paying buyers their credit</div>
+      </div>
+      <div class="kpi">
+        <div class="label">Earned from upgrades</div>
+        <div class="value"><small>RM</small> {{ '{:,.0f}'.format(totals.upgrade_revenue_rm) }}</div>
+        <div class="note">SDP's margin when buyers chose better fittings</div>
+      </div>
+      <div class="kpi">
+        <div class="label">Rehomed next door</div>
+        <div class="value">{{ '{:.0f}'.format(totals.reuse.reuse_rate * 100) }}<small>%</small></div>
+        <div class="note">{{ totals.reuse.collected }} of {{ totals.reuse.listed }} removed fittings went to a neighbour</div>
+      </div>
+    </div>
+    <div class="results-foot">
+      <a href="{{ url_for('dashboard.simulate', unit=unit) }}">Project a whole launch in the what-if simulator →</a>
+      <a href="{{ url_for('dashboard.match', unit=unit) }}">See the Neighbour Match map →</a>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="ripout-title">
+    <div class="section-head">
+      <h2 id="ripout-title"><span class="step">1</span>What owners rip out</h2>
+      <p>Share of owners of this home type who removed each fitting after handover. Click a bar or row to find it in the house.
+        <a class="inline-link" href="{{ url_for('dashboard.tagger_page', unit=unit) }}">Where this data comes from →</a></p>
+    </div>
+    <div class="split">
+      <div class="panel">
+        <div class="panel-head">
+          <div>
+            <h3>Rip-out index</h3>
+            <p class="lead">Bar colour shows SDP's advice. Dotted lines show where it changes. Click a bar to see it in 3D.</p>
+          </div>
+          <div class="dl-row">
+            <button type="button" class="dl" id="dl-chart" aria-label="Download the rip-out chart as a PNG image">↓ PNG</button>
+            <a class="dl" href="{{ url_for('dashboard.export_csv', name='ripout-index', unit=unit) }}" download
+               aria-label="Download the rip-out index as a CSV file">↓ CSV</a>
+          </div>
+        </div>
+        <div id="ripout-chart">{{ chart | safe }}</div>
+      </div>
+      <div class="panel">
+        <h3>What to change next launch</h3>
+        <p class="lead">Click a row to see the fitting in 3D.</p>
+        <table class="feedback">
+          <thead><tr><th>Fitting</th><th class="num">Removed</th><th>Advice</th></tr></thead>
+          <tbody>
+          {% for row in feedback %}
+            {% set cls = 'stop' if row.advice.startswith('Stop') else ('offer' if row.advice.startswith('Offer') else 'keep') %}
+            {% set icon = '✕' if cls == 'stop' else ('!' if cls == 'offer' else '✓') %}
+            <tr data-fid="{{ row.fitting_id }}" tabindex="0" title="Show in 3D">
+              <td>{{ row.name }}</td>
+              <td class="num">{{ '{:.0f}'.format(row.rate * 100) }}%</td>
+              <td><span class="badge {{ cls }}"><span class="dot" aria-hidden="true">{{ icon }}</span>{{ row.advice }}</span></td>
+            </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="choices-title">
+    <div class="section-head">
+      <h2 id="choices-title"><span class="step">2</span>What buyers chose</h2>
+      <p>Choices made in the Buyer Advisor, and what each fitting saved.</p>
+    </div>
+    <div class="panel">
+      <div class="dl-row end">
+        <a class="dl" href="{{ url_for('dashboard.export_csv', name='impact-by-fitting', unit=unit) }}" download
+           aria-label="Download the table of buyer choices by fitting as a CSV file">↓ CSV: by fitting</a>
+        <a class="dl" href="{{ url_for('dashboard.export_csv', name='choices', unit=unit) }}" download
+           aria-label="Download every buyer choice as a CSV file">↓ CSV: every choice</a>
+      </div>
+      <table>
+        <thead><tr>
+          <th>Fitting</th><th class="num">Opted out</th><th class="num">Upgraded</th>
+          <th class="num">Carbon saved (kg CO₂e)</th><th class="num">SDP saved (RM)</th>
+          <th class="num">Upgrade income (RM)</th>
+        </tr></thead>
+        <tbody>
+        {% for row in by_fitting %}
+          <tr>
+            <td>{{ row.name }}</td>
+            <td class="num">{{ row.opt_outs }}</td>
+            <td class="num">{{ row.upgrades }}</td>
+            <td class="num">{{ '{:,.0f}'.format(row.carbon_avoided_kg) }}</td>
+            <td class="num">{{ '{:,.0f}'.format(row.sdp_saving_rm) }}</td>
+            <td class="num">{{ '{:,.0f}'.format(row.upgrade_revenue_rm) }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <div class="panel mix-panel">
+      <div class="panel-head">
+        <div>
+          <h3>Which upgrades buyers pick</h3>
+          <p class="lead">Each fitting's upgrades split by option. Plan next launch's specs around the favourites.</p>
+        </div>
+        <div class="dl-row">
+          <a class="dl" href="{{ url_for('dashboard.export_csv', name='upgrade-mix', unit=unit) }}" download
+             aria-label="Download the upgrade options buyers picked as a CSV file">↓ CSV: upgrade mix</a>
+        </div>
+      </div>
+      <div class="mix-grid">
+      {% for f in upgrade_mix %}
+        {# "Top pick" only when one option clearly leads #}
+        {% set top = f.options | map(attribute='picks') | max %}
+        {% set top = top if f.options | selectattr('picks', 'equalto', top) | list | length == 1 else 0 %}
+        <div class="mix">
+          <div class="mix-head">
+            <h4>{{ f.name }}</h4>
+            <span>{{ f.upgrades }} upgrade{{ '' if f.upgrades == 1 else 's' }}</span>
+          </div>
+          {% if f.upgrades %}
+            <div class="mix-bar" role="img" aria-label="{{ f.name }} upgrades: {% for o in f.options %}{{ o.upgrade_name }} {{ '{:.0f}'.format(o.share * 100) }}%{{ ', ' if not loop.last }}{% endfor %}">
+              {# loop.index is the option's colour, so it stays the same when one has no picks #}
+              {% for o in f.options %}{% if o.picks %}
+                <span class="mix-seg o{{ loop.index }}" style="width: {{ '{:.2f}'.format(o.share * 100) }}%"
+                      title="{{ o.upgrade_name }}: {{ '{:.0f}'.format(o.share * 100) }}% · {{ o.picks }} pick{{ '' if o.picks == 1 else 's' }}"></span>
+              {% endif %}{% endfor %}
+            </div>
+          {% else %}
+            <p class="mix-empty">No upgrades yet.</p>
+          {% endif %}
+          <ul class="mix-legend">
+            {% for o in f.options %}
+              <li>
+                <i class="mix-sw o{{ loop.index }}" aria-hidden="true"></i>
+                <span class="mix-name">{{ o.upgrade_name }}{% if top and o.picks == top %} <em class="pill top-pick">Top pick</em>{% endif %}
+                  <small>{{ o.picks }} pick{{ '' if o.picks == 1 else 's' }} · RM {{ '{:,.0f}'.format(o.margin_earned_rm) }} margin</small></span>
+                <b>{{ '{:.0f}'.format(o.share * 100) }}%</b>
+              </li>
+            {% endfor %}
+          </ul>
+        </div>
+      {% endfor %}
+      </div>
+    </div>
+  </section>
+
+  <section class="method" aria-labelledby="method-title">
+    <h2 id="method-title">How we worked it out</h2>
+    <ul>
+      <li>Carbon per fitting = its weight × a carbon factor for its material. The factors come from the ICE database (v4), e.g. particleboard 0.664 kg CO₂e per kg; prices are the low end of Malaysian retail prices.</li>
+      <li>We only count carbon for fittings the buyer would have ripped out anyway, which is why only frequently removed items are offered.</li>
+      <li>SDP's saving = installation it no longer pays for, minus the credit it gives the buyer. Upgrade income = SDP's margin on each upgrade.</li>
+      <li>Reused fittings count their carbon, minus the delivery trip ({{ transport }} kg CO₂e per km, both ways).</li>
+      <li>Advice: removed by {{ '{:.0f}'.format(stop * 100) }}% or more of owners → stop installing; {{ '{:.0f}'.format(offer * 100) }}–{{ '{:.0f}'.format(stop * 100) }}% → offer as an opt-out (or as an upgrade, for items like tiles that can't be left out); fewer → keep.</li>
+    </ul>
+  </section>
+</div>
+
+<script type="importmap">
+  {"imports": {
+    "three": "{{ url_for('static', filename='vendor/three.module.min.js') }}",
+    "three/addons/": "{{ url_for('static', filename='vendor/') }}"
+  }}
+</script>
+<script type="module">
+  import { mountHouse } from "{{ url_for('static', filename='house3d.js') }}";
+
+  // Download the rip-out chart as a PNG on a solid background (not transparent).
+  document.getElementById('dl-chart').addEventListener('click', async () => {
+    const plot = document.querySelector('#ripout-chart .js-plotly-plot');
+    if (!plot || !window.Plotly) return;
+    const before = { paper_bgcolor: plot.layout.paper_bgcolor, plot_bgcolor: plot.layout.plot_bgcolor,
+                     margin: { ...plot.layout.margin }, title: { text: '' }, 'yaxis.automargin': true };
+    // For the image only: solid background, a title, and room for the longest label.
+    await Plotly.relayout(plot, {
+      paper_bgcolor: '#fffdf8', plot_bgcolor: '#fffdf8',
+      margin: { l: 236, r: 56, t: 118, b: 48 }, 'yaxis.automargin': false,
+      title: { text: {{ ('Rip-out index · ' ~ unit_types[unit]) | tojson }}
+                     + '<br><span style="font-size:13px;color:#5b635c">Share of owners who removed each fitting · simulated demo data</span>',
+               x: 0.03, xanchor: 'left', y: 1, yanchor: 'top', pad: { t: 26 },
+               font: { size: 20, color: '#1c211d', family: 'Figtree, sans-serif' } },
+    });
+    try {
+      await Plotly.downloadImage(plot, { format: 'png', scale: 2, width: 960, height: plot.offsetHeight + 90,
+                                         filename: 'right-fit-ripout-index-{{ unit }}' });
+    } finally {
+      await Plotly.relayout(plot, before);
+    }
+  });
+
+  const view = mountHouse(document.getElementById('house'), {
+    unit: {{ unit | tojson }},
+    fittings: {{ house_fittings | tojson }},
+  });
+
+  if (view) {
+    // Shows the fitting in 3D from either view: Fittings view, its floor, zoomed in.
+    const showIn3D = fid => {
+      view.focus(fid);
+      document.getElementById('house').scrollIntoView({ behavior: 'smooth', block: 'center' });
+    };
+    // Table rows: click (or Enter) shows that fitting in 3D; hover highlights it.
+    document.querySelectorAll('.feedback tbody tr').forEach(tr => {
+      const fid = tr.dataset.fid;
+      tr.addEventListener('click', () => showIn3D(fid));
+      tr.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); showIn3D(fid); } });
+      tr.addEventListener('mouseenter', () => view.highlight(fid));
+      tr.addEventListener('mouseleave', () => view.clear());
+    });
+    // Chart bars: the same. Hover only lights a fitting up once the Fittings view is open,
+    // so clicking is what works from the Exterior view.
+    const plot = document.querySelector('#ripout-chart .js-plotly-plot');
+    if (plot && plot.on) {
+      plot.on('plotly_hover', e => view.highlight(e.points[0].customdata[3]));
+      plot.on('plotly_unhover', () => view.clear());
+      plot.on('plotly_click', e => showIn3D(e.points[0].customdata[3]));
+    }
+  }
+</script>
+</body>
+</html>
