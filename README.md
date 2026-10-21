@@ -9,8 +9,9 @@ and waste).
 
 | Page | What it does |
 | --- | --- |
+| Demo sign-in | Pick who you are: SDP staff, a homeowner or a buyer moving in. No password (simulated people) |
+| SDP dashboard | The main page. Rip-out index, "stop installing" advice for the next launch, carbon and RM saved, which upgrades buyers pick |
 | Buyer advisor | Keep, opt out for a credit, or pick an upgrade option, with live savings and a 3D model of the home that shows the chosen finish |
-| SDP dashboard | Rip-out index, "stop installing" advice for the next launch, carbon and RM saved, which upgrades buyers pick |
 | Neighbour Match | A community board for each home type: neighbours give away fittings they removed, ask for ones they need, chat, and say thanks. The nearest same-design home gets it |
 | What-if | Projects a whole launch: waste avoided, carbon, SDP's gain and payback |
 | AI tagging | Sorts messy renovation notes (English and Malay) into fittings, with an honest accuracy score |
@@ -37,9 +38,11 @@ Debug mode (error pages with the code, auto-reload) is off unless you ask for
 it: `FLASK_DEBUG=1 python app.py`. Never turn it on when other people can reach
 the app, for example with `flask run --host 0.0.0.0` to show it on phones.
 
+- `/` opens the demo sign-in (`/signin`) the first time, then the SDP dashboard
+- `/signin`: demo sign-in. SDP staff go to the dashboard, homeowners to Neighbour Match, buyers moving in to the Advisor
+- `/dashboard`: the SDP dashboard, the main page (first in the menu, and where the logo goes)
 - `/advisor`: the buyer screen. Keep, opt out or upgrade each fitting, with the working behind every number
-- `/dashboard`: the SDP dashboard
-- `/match`: Neighbour Match community. Give away a removed fitting or ask for one, take an offer or answer a request, chat, mark it collected with a thank-you. `&as=T2S-B025` (or the "Switch neighbour" menu) picks which neighbour you are
+- `/match`: Neighbour Match community. Give away a removed fitting or ask for one, take an offer or answer a request, chat, mark it collected with a thank-you. As the neighbour signed in; the "Switch neighbour" menu signs in as someone else
 - `/simulate`: What-if. Sliders to project a whole launch (carbon, RM, payback)
 - `/tagger`: AI tagging. Type a messy note, see it sorted into fittings, add it as a report, then offer the removed fittings on Neighbour Match
 
@@ -74,7 +77,8 @@ file inside. On GitHub, the message next to each file says what it is.
 | `match_map.py` | Gives each home a spot and an address on the fictional township map, and measures the distance between two homes | Member 4 |
 | `templates/match.html` | Neighbour Match community page: composer, feed, sidebar, map | Member 4 |
 | `static/app.css` | Shared styles and brand (forest green + terracotta) | — |
-| `templates/_topbar.html` | Logo and page switcher shared by every page | — |
+| `templates/_topbar.html` | Logo, page menu and who is signed in, shared by every page | — |
+| `templates/signin.html` | Demo sign-in screen | Member 4 |
 | `static/fonts/` | Fraunces (headlines) + Figtree (text), bundled for offline use, OFL licence | — |
 | `static/upgrades/` | A picture of each upgrade option (drawn illustrations, not product photos) | Member 1 |
 | `test_impact.py` | Checks for the calculations | Member 4 |
@@ -267,6 +271,22 @@ advice colours come from the page's `<body>`, as above). Add an element
 with `data-floor-picker` holding an empty `.seg` inside it and the Floor buttons
 fill it (see `templates/dashboard.html`).
 
+## Demo sign-in
+
+There are no passwords: everyone in the demo is simulated. `/signin` offers
+three roles, SDP staff, a homeowner or a buyer moving in, with a suggested
+person for each home type, or anyone from a list. Who is signed in is kept in
+Flask's signed session cookie, shown at the top right of every page, and decides
+whose view Neighbour Match shows and which home type opens first. Every page
+still works without signing in.
+
+`dashboard.signed_in()` is the one place the app asks who is signed in. The
+real login (with the database) should replace it and the `/signin` routes,
+returning the logged-in user's id the same way (`T2S-O001`, or `sdp` for SDP
+staff), so nothing else has to change. The session cookie is signed with
+`RFH_SECRET_KEY` if set, else a random key made at start-up (everyone is signed
+out when the app restarts).
+
 ## How the numbers are calculated
 
 - **Carbon per item** = `weight_kg × carbon_factor`.
@@ -302,9 +322,10 @@ neighbour with the same house design, so it fits without changes.
 
 Some owners will still remove a fitting. Neighbour Match is a community board
 for each home type that rehomes it to a neighbour with the same house design,
-so it fits without changes. The page shows it as one neighbour sees it: pick
-who you are with "Switch neighbour" (the default is an owner with something a
-neighbour is looking for, so a demo "Give" matches at once).
+so it fits without changes. The page shows it as the neighbour signed in sees
+it; "Switch neighbour" signs in as someone else. Not signed in as someone from
+this home type, it shows a sample neighbour: an owner with something a
+neighbour is looking for, so a demo "Give" matches at once.
 
 1. **Give.** An owner posts a fitting they removed, with its condition and a
    note. They must have a rip-out report saying so (add one on the AI tagging
