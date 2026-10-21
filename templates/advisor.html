@@ -76,6 +76,7 @@
     <div class="choice-list">
       {% for f in choosable %}
         {% set pct = '{:.0f}'.format(f.rate * 100) %}
+        {% set mine = saved.get(f.fitting_id) or {} %}{% set my_choice = mine.choice or 'keep' %}{% set my_up = mine.upgrade_id or '' %}
         <fieldset class="choice" data-fid="{{ f.fitting_id }}">
           <legend><h3>{{ f.name }}</h3></legend>
           <div class="choice-head">
@@ -84,17 +85,17 @@
           </div>
           <div class="options {{ 'two' if f.eligibility == 'upgrade_only' }}">
             <label class="opt keep">
-              <input type="radio" name="c-{{ f.fitting_id }}" value="keep" checked>
+              <input type="radio" name="c-{{ f.fitting_id }}" value="keep" {{ 'checked' if my_choice == 'keep' }}>
               <span><b>Keep</b><small>Installed as standard</small></span>
             </label>
             {% if f.eligibility == 'opt_out' %}
             <label class="opt opt_out">
-              <input type="radio" name="c-{{ f.fitting_id }}" value="opt_out">
+              <input type="radio" name="c-{{ f.fitting_id }}" value="opt_out" {{ 'checked' if my_choice == 'opt_out' }}>
               <span><b>Opt out</b><small>RM {{ '{:,.0f}'.format(f.credit_rm) }} credit</small></span>
             </label>
             {% endif %}
             <label class="opt upgrade">
-              <input type="radio" name="c-{{ f.fitting_id }}" value="upgrade">
+              <input type="radio" name="c-{{ f.fitting_id }}" value="upgrade" {{ 'checked' if my_choice == 'upgrade' }}>
               <span><b>Upgrade</b><small>{{ 'Pick from %d options' % (f.upgrades | length) if f.upgrades
                                             else 'Better version installed instead' }}</small></span>
             </label>
@@ -106,7 +107,7 @@
               {% for u in f.upgrades %}
               <label class="opt upgrade">
                 <input type="radio" name="u-{{ f.fitting_id }}" value="{{ u.upgrade_id }}"
-                       data-name="{{ u.name }}" {{ 'checked' if loop.first }}>
+                       data-name="{{ u.name }}" {{ 'checked' if u.upgrade_id == my_up or (loop.first and my_up not in f.upgrades | map(attribute='upgrade_id') | list) }}>
                 <span>{% if u.image is string and u.image %}<img src="{{ url_for('static', filename=u.image) }}"
                         alt="" width="160" height="100" loading="lazy">{% endif %}<b>{{ u.name }}</b><small>{{ u.description }}</small></span>
               </label>
@@ -144,6 +145,9 @@
         <div class="sum-row"><span>Installation saved, after credits</span><b id="sum-sdp">RM 0</b></div>
         <div class="sum-row"><span>Margin on upgrades</span><b id="sum-margin">RM 0</b></div>
       </div>
+      <p class="saving-as">{% if saving_as %}Saving for <b>{{ saving_as.name }}</b>, {{ saving_as.home }}.
+        Your earlier choices are filled in; confirming replaces them.
+        {% else %}Saves as a new buyer. <a href="{{ url_for('dashboard.signin', unit=unit) }}">Sign in as a buyer</a> to save your own.{% endif %}</p>
       <button type="button" class="btn-primary" id="confirm">Confirm my choices</button>
       <button type="button" class="btn-link" id="reset">Reset to standard</button>
       <div id="result" aria-live="polite"></div>
@@ -274,6 +278,11 @@
     card.addEventListener('mouseenter', () => view && view.highlight(card.dataset.fid));
     card.addEventListener('mouseleave', () => view && view.clear());
   });
+  // A signed-in buyer's earlier choices are already ticked: show their impact and the totals.
+  cards.forEach(card => {
+    const ticked = card.querySelector('input[name^="c-"]:checked');
+    if (ticked && ticked.value !== 'keep') choose(card, ticked.value, { focus: false });
+  });
 
   document.getElementById('reset').addEventListener('click', () => {
     cards.forEach(card => {
@@ -296,7 +305,8 @@
       });
       const body = await res.json();
       if (!res.ok) throw new Error(body.error || 'Could not save your choices');
-      out.innerHTML = `<div class="saved">Saved as buyer <b>${body.buyer_id}</b>. `
+      const saved = body.name ? `Saved for <b>${esc(body.name)}</b>` : `Saved as buyer <b>${body.buyer_id}</b>`;
+      out.innerHTML = `<div class="saved">${saved}${(body.name || '').endsWith('.') ? '' : '.'} `   // "Arjun R." has its own full stop
         + `The SDP dashboard now counts ${body.totals.buyers} buyers for this home type. `
         + `<a href="/dashboard?unit=${encodeURIComponent(UNIT)}">See it on the dashboard →</a></div>`;
     } catch (err) {
