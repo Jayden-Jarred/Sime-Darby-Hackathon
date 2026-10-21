@@ -1,14 +1,18 @@
 """
-match_map.py - lay out the Neighbour Match listings on a fictional township map.
+match_map.py - where every home sits on the Neighbour Match township map.
 
 The map is a simple site plan in an SVG coordinate space (1000 x 620,
-200 units = 1 km). Each listing's two homes are placed so the drawn distance
-roughly matches distance_km in matches.csv. Positions are illustrative,
-not real addresses.
+200 units = 1 km). Each owner or buyer gets a fixed home from their id
+number, no two the same: a terrace slot for T2S ("No. 14, Jalan Harmoni 3"),
+a flat in one of six towers for C3R ("Tower B, #12-03"). Distances between
+two homes are measured on this map, so the drawn routes and the distance_km
+stored in matches.csv always agree. The township and its addresses are
+fictional.
 """
 
 import hashlib
 import math
+import re
 
 import impact
 
@@ -16,9 +20,10 @@ PX_PER_KM = 200
 TERRACE_ROWS = [92 + 44 * i for i in range(11)]           # y of each terrace row
 CROSS_STREETS = [(226, 246), (402, 422), (578, 598)]      # x gaps in the rows
 TOWERS = [(790, 130), (880, 130), (790, 250), (880, 250), (790, 370), (880, 370)]
+TOWER_CENTRE = 15                                         # towers are 30 x 30
 
 
-def _h(s):
+def _hash(s):
     return int(hashlib.md5(s.encode()).hexdigest(), 16)
 
 
@@ -32,23 +37,48 @@ def _terrace_slots():
 
 
 SLOTS = _terrace_slots()
+STRIDE = 263          # a prime that shares no factor with len(SLOTS): spreads homes across the map
+BUYER_OFFSET = len(SLOTS) // 2
 
 
-def _place(owner, unit_type):
+def home_number(person):
+    """
+    A person's home index: owner T2S-O001 -> 0, buyer T2S-B001 -> BUYER_OFFSET.
+    Unique while the id number is at most BUYER_OFFSET (341 for T2S); any
+    other id falls back to a hash, so it still gets a home.
+    """
+    m = re.fullmatch(r"[A-Z0-9]+-([OB])(\d+)", person or "")
+    if not m or not 0 < int(m[2]) <= BUYER_OFFSET:
+        return _hash(person or "")
+    return int(m[2]) - 1 + (BUYER_OFFSET if m[1] == "B" else 0)
+
+
+def _terrace_slot(person):
+    return (home_number(person) * STRIDE) % len(SLOTS)
+
+
+def position(person, unit_type):
+    """Map position (x, y) of an owner's or buyer's home."""
     if unit_type == "C3R":
-        x, y = TOWERS[_h(owner) % len(TOWERS)]
-        return x + 15, y + 15
-    return SLOTS[_h(owner) % len(SLOTS)]
+        x, y = TOWERS[home_number(person) % len(TOWERS)]
+        return x + TOWER_CENTRE, y + TOWER_CENTRE
+    return SLOTS[_terrace_slot(person)]
 
 
-def _nearest_at(origin, km, unit_type, seed):
-    """The home whose distance from origin is closest to km (ties broken by seed)."""
-    target = km * PX_PER_KM
-    pool = [(x + 15, y + 15) for x, y in TOWERS] if unit_type == "C3R" else SLOTS
-    best = min(pool, key=lambda p: (abs(math.dist(origin, p) - target), (_h(seed + str(p)) % 997)))
-    if best == origin and unit_type == "C3R":   # same tower: offset so the path is visible
-        best = (origin[0] + 0.01, origin[1])
-    return best
+def address(person, unit_type):
+    """A fictional address: "No. 14, Jalan Harmoni 3" or "Tower B, #12-03"."""
+    n = home_number(person)
+    if unit_type == "C3R":
+        rest = n // len(TOWERS)
+        return f"Tower {'ABCDEF'[n % len(TOWERS)]}, #{2 + rest % 30:02d}-{1 + rest // 30:02d}"
+    x, y = SLOTS[_terrace_slot(person)]
+    house = sum(1 for sx, sy in SLOTS if sy == y and sx < x) + 1
+    return f"No. {house}, Jalan Harmoni {TERRACE_ROWS.index(y) + 1}"
+
+
+def distance_km(a, b, unit_type):
+    """Map distance between two homes, in km. At least 0.1 (another flat in the same tower)."""
+    return max(0.1, round(math.dist(position(a, unit_type), position(b, unit_type)) / PX_PER_KM, 1))
 
 
 def listings(data, unit_type):
@@ -58,10 +88,12 @@ def listings(data, unit_type):
     out = []
     for r in m.to_dict("records"):
         fit = f.loc[r["fitting_id"]]
-        src = _place(r["from_owner"], unit_type)
+        src = position(r["from_owner"], unit_type)
         has_to = isinstance(r["to_owner"], str) and r["to_owner"]
         km = float(r["distance_km"]) if has_to else None
-        dst = _nearest_at(src, km, unit_type, r["listing_id"]) if has_to else None
+        dst = position(r["to_owner"], unit_type) if has_to else None
+        if dst == src:   # same tower: nudge so the route is visible
+            dst = (src[0] + 12, src[1])
         saved = impact.reuse_carbon_kg(float(fit.weight_kg), float(fit.carbon_factor), km or 0)
         out.append({
             "id": r["listing_id"], "fitting_id": r["fitting_id"], "name": fit["name"],
@@ -75,6 +107,16 @@ def listings(data, unit_type):
     order = {"collected": 0, "matched": 1, "unmatched": 2}
     out.sort(key=lambda x: (order[x["status"]], x["km"] or 99))
     return out
+
+
+def asks(data, unit_type):
+    """Open requests (neighbours asking for a fitting), with where they live."""
+    req = data["requests"]
+    req = req[(req.unit_type == unit_type) & (req.status == "open")]
+    names = data["fittings"][data["fittings"].unit_type == unit_type].set_index("fitting_id").name
+    return [{"id": r.request_id, "requester": r.requester, "fitting_id": r.fitting_id,
+             "name": names[r.fitting_id], "at": list(position(r.requester, unit_type))}
+            for r in req.itertuples()]
 
 
 def map_layout(unit_type):
