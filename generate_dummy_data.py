@@ -247,6 +247,7 @@ def write_fittings():
           fitting_rows())
 
 
+@impact.locked   # a reset from the dashboard waits for any save in progress, and pages wait for it
 def main():
     random.seed(SEED)   # every run, so a reset always gives the same demo data
     write_fittings()
