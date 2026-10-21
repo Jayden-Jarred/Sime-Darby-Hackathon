@@ -241,6 +241,9 @@ tr:last-child td { border-bottom: 0; }
 .not-choosable { display: grid; gap: 10px; }
 .reset-row { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 14px; margin: 18px 0 0; }
 .reset-row .btn-link { padding-top: 0; }
+.saving-as { margin: 16px 0 10px; font-size: 14px; color: var(--on-forest-2); }
+.saving-as b { color: var(--on-forest); }
+.saving-as a { color: var(--terra-2); font-weight: 650; }
 .ask-sdp { border: 1.5px dashed #cfc7b9; border-radius: var(--radius); padding: 14px 18px; color: var(--ink-3); }
 .ask-sdp b { color: var(--ink-2); }
 .ask-sdp p { margin: 4px 0 0; font-size: 14.5px; }
@@ -540,7 +543,8 @@ label.tag-card { cursor: pointer; }
 .post-status b { color: var(--ink); }
 .post-status.matched { background: #fbefcf; }
 .post-status.collected { background: var(--forest-tint); }
-.ask-note { margin: 8px 0 0; font-size: 14.5px; color: var(--ink-2); padding-left: 12px; border-left: 3px solid #e3b9a6; overflow-wrap: anywhere; }
+.ask-note { margin: 8px 0 0; font-size: 14.5px; color: var(--ink-2); padding: 8px 12px; border-radius: 4px 14px 14px 14px;
+            background: #faf0ea; overflow-wrap: anywhere; }   /* the asker's words, as a chat bubble */
 .ask-note b { color: var(--ink); }
 .post-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; align-items: center; }
 .post-actions:not(:has(*)) { display: none; }
@@ -585,10 +589,12 @@ label.tag-card { cursor: pointer; }
 .board small { color: var(--ink-3); font-size: 12.5px; }
 .board em { font-style: normal; font-weight: 700; color: var(--forest); font-variant-numeric: tabular-nums; }
 .activity { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 10px; }
-.activity li { display: grid; padding-left: 12px; border-left: 3px solid var(--line); font-size: 14px; line-height: 1.4; }
-.activity li.collected { border-color: var(--forest-2); }
-.activity li.match { border-color: #d99a12; }
-.activity li.ask { border-color: var(--terra); }
+.activity li { position: relative; display: grid; padding-left: 18px; font-size: 14px; line-height: 1.4; }
+.activity li::before { content: ""; position: absolute; left: 0; top: .45em; width: 9px; height: 9px; border-radius: 50%;
+                       background: #c9c0ae; }   /* a dot per event, coloured like the map: offered */
+.activity li.collected::before { background: var(--forest-2); }   /* delivered */
+.activity li.match::before { background: #d99a12; }               /* on its way */
+.activity li.ask::before { background: var(--terra); }            /* looking for */
 .activity a { color: var(--ink); text-decoration: none; }
 .activity a:hover { text-decoration: underline; }
 .activity small { color: var(--ink-3); font-size: 12.5px; }
