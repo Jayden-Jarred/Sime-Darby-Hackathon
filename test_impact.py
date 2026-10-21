@@ -437,6 +437,46 @@ assert web.post("/signin", data={"who": "sdp"}, headers={"Origin": "https://evil
 web.post("/signout")
 assert web.get("/").headers["Location"].endswith("/signin")
 
+# reuse rate, as the proposal defines it: fittings rehomed out of every reusable fitting owners removed
+rp = data["ripouts"]
+for unit in ("T2S", "C3R"):
+    s = impact.reuse_summary(data, unit)
+    removed = rp[(rp.unit_type == unit) & (rp.removed == 1) & ~rp.fitting_id.isin(impact.NOT_REUSABLE)]
+    assert s["removed"] == len(removed) and s["collected"] <= s["listed"] <= s["removed"], (unit, s)
+    assert s["reuse_rate"] == s["collected"] / s["removed"], (unit, s)
+page = client.get("/dashboard?unit=T2S").data.decode()
+r = impact.reuse_summary(data, "T2S")
+assert f"{r['collected']} of the {r['removed']} reusable fittings owners removed" in page
+
+# the dashboard works out each distinct choice once, with the same results as one by one
+import pandas as pd
+real_impact_of, calls = impact.impact_of, []
+impact.impact_of = lambda *a, **k: calls.append(a[1:5]) or real_impact_of(*a, **k)
+try:
+    fast = impact.choice_impacts(data, "T2S")
+finally:
+    impact.impact_of = real_impact_of
+ct = data["choices"][data["choices"].unit_type == "T2S"]
+assert len(calls) == len(set(zip(ct.unit_type, ct.fitting_id, ct.choice, ct.upgrade_id))) < len(ct) / 5, len(calls)
+rates = impact.ripout_rates(data, "T2S")
+one_by_one = pd.DataFrame([real_impact_of(F, u, f, ch, up or None, data["upgrades"], rates.get((u, f)))
+                           for u, f, ch, up in zip(ct.unit_type, ct.fitting_id, ct.choice, ct.upgrade_id)])
+num = ["carbon_avoided_kg", "material_avoided_kg", "sdp_saving_rm", "upgrade_revenue_rm", "buyer_saving_rm"]
+assert len(fast) == len(ct) and (fast[num] == one_by_one[num]).all().all()
+assert (fast.fitting_id.tolist() == ct.fitting_id.tolist())                 # same order as the choices
+
+# the What-if explains why tiles count there but not in the Advisor, with this home type's real figures
+for unit, name, kg in (("T2S", "ground-floor tiles", "1,800"), ("C3R", "living-room tiles", "715")):
+    page = client.get(f"/simulate?unit={unit}").data.decode()
+    rate = impact.ripout_rates(data, unit)[(unit, "TIL-FLR")]
+    assert "Why tiles count here but not in the Advisor" in page and f"{kg} kg per home" in page, unit
+    assert f"{rate * 100:.0f}% of owners rip out the {name}" in page and f"{round(impact.OFFER_THRESHOLD * 100)}%" in page, unit
+
+# AI tagging names each fitting the way this home type's data does (not the tagger's generic names)
+for unit, name in (("T2S", "Ground-floor tiles"), ("C3R", "Living-room tiles")):
+    tags = client.post("/api/tag", json={"unit": unit, "note": "hack all the floor tiles, retile"}).json["tags"]
+    assert [t["name"] for t in tags if t["fitting_id"] == "TIL-FLR"] == [name], (unit, tags)
+
 t = impact.dashboard_totals(data, "T2S")
 print("All checks passed.")
 print({k: (round(v) if isinstance(v, float) else v) for k, v in t.items() if k != "reuse"})
