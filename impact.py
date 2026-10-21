@@ -5,8 +5,8 @@ Everything the other screens show comes from here:
   - load_data(), get_fitting(), get_upgrade()   read the CSVs, look up one row
   - locked, next_id()    saves take turns; the next id to hand out
   - impact_of()          cost and carbon of ONE buyer choice (for the Advisor screen)
-  - save_buyer_choices() append a buyer's Advisor choices to choices.csv
-  - add_ripout_report()  append an owner's tagged report to ripouts.csv
+  - save_buyer_choices() save a buyer's Advisor choices to choices.csv (new or signed-in buyer)
+  - add_ripout_report()  save an owner's tagged report to ripouts.csv (new or signed-in owner)
   - ripout_index()       share of owners who removed each fitting
   - advice_for(), design_feedback()   "stop installing X in unit type B" advice
   - simulate()           the What-if projection for a whole launch
@@ -207,17 +207,20 @@ def _working(r, f, kg, factor, ripout_rate):
 
 
 @locked
-def save_buyer_choices(unit_type, picks, data_dir=DATA_DIR, upgrade_picks=None):
+def save_buyer_choices(unit_type, picks, data_dir=DATA_DIR, upgrade_picks=None, buyer_id=None):
     """
-    Append one new buyer's Advisor choices to choices.csv, so the SDP
-    dashboard includes them. `picks` maps fitting_id -> choice; eligible
-    fittings not in `picks` are saved as "keep". Fixed fittings may be sent
-    as "keep" (they always are) but aren't saved. `upgrade_picks` maps
-    fitting_id -> upgrade_id for upgrades (default: the first option).
-    Returns the new buyer_id.
-    Raises ValueError for an unknown fitting or a choice that isn't allowed,
-    KeyError for an unknown upgrade option.
+    Save one buyer's Advisor choices to choices.csv, so the SDP dashboard
+    includes them. `picks` maps fitting_id -> choice; eligible fittings not in
+    `picks` are saved as "keep". Fixed fittings may be sent as "keep" (they
+    always are) but aren't saved. `upgrade_picks` maps fitting_id -> upgrade_id
+    for upgrades (default: the first option).
+    `buyer_id` (the signed-in buyer, e.g. T2S-B025) replaces that buyer's
+    earlier choices, so a buyer who confirms again is still one buyer. Without
+    it, the choices are saved as a new buyer. Returns the buyer_id.
+    Raises ValueError for an unknown fitting, a choice that isn't allowed or a
+    buyer_id from another home type, KeyError for an unknown upgrade option.
     """
+    _check_person_id(buyer_id, f"{unit_type}-B", "buyer")
     upgrade_picks = upgrade_picks or {}
     data = load_data(data_dir)
     fittings = data["fittings"]
@@ -240,19 +243,35 @@ def save_buyer_choices(unit_type, picks, data_dir=DATA_DIR, upgrade_picks=None):
         if eligibility != "fixed":   # always installed, so not a choice to save
             rows.append((fid, imp["choice"], imp["upgrade_id"] or ""))
 
-    buyer_id = next_id(data["choices"].buyer_id, f"{unit_type}-B")
+    path, choices = Path(data_dir) / "choices.csv", data["choices"]
+    if buyer_id is None:
+        buyer_id = next_id(choices.buyer_id, f"{unit_type}-B")
     new = pd.DataFrame([(buyer_id, unit_type, fid, ch, up) for fid, ch, up in rows],
                        columns=["buyer_id", "unit_type", "fitting_id", "choice", "upgrade_id"])
-    new.to_csv(Path(data_dir) / "choices.csv", mode="a", header=False, index=False)
+    if (choices.buyer_id == buyer_id).any():   # this buyer confirmed before: their new choices replace the old
+        pd.concat([choices[choices.buyer_id != buyer_id], new], ignore_index=True).to_csv(path, index=False)
+    else:
+        new.to_csv(path, mode="a", header=False, index=False)
     return buyer_id
 
 
+def _check_person_id(person_id, prefix, what):
+    """None (a new person), or an id like T2S-B025 for this home type. Raises ValueError otherwise."""
+    if person_id is not None and not (isinstance(person_id, str) and person_id.startswith(prefix)
+                                      and person_id[len(prefix):].isdigit()):
+        raise ValueError(f"{person_id} isn't a {what} id for this home type (expected {prefix}…)")
+
+
 @locked
-def add_ripout_report(unit_type, fitting_ids, note, data_dir=DATA_DIR):
+def add_ripout_report(unit_type, fitting_ids, note, data_dir=DATA_DIR, owner_id=None):
     """
-    Add one owner's renovation report to ripouts.csv: removed=1 for the tagged
-    fittings, 0 for the rest of that unit type's fittings. Returns the owner_id.
+    Save one owner's renovation report to ripouts.csv. A new owner gets a row per
+    fitting of the unit type: removed=1 for the tagged fittings, 0 for the rest.
+    `owner_id` (the signed-in owner, e.g. T2S-O001) adds the tagged fittings to
+    that owner's existing rows instead, so one owner never counts twice in the
+    rip-out index. Returns the owner_id.
     """
+    _check_person_id(owner_id, f"{unit_type}-O", "homeowner")
     data = load_data(data_dir)
     unit_fittings = list(data["fittings"][data["fittings"].unit_type == unit_type].fitting_id)
     if not unit_fittings:
@@ -264,12 +283,21 @@ def add_ripout_report(unit_type, fitting_ids, note, data_dir=DATA_DIR):
         raise ValueError(f"Not a fitting for {unit_type}: {', '.join(sorted(unknown))}")
     if not fitting_ids:
         raise ValueError("No fittings to record")
-    owner = next_id(data["ripouts"].owner_id, f"{unit_type}-O")
+    path, rip = Path(data_dir) / "ripouts.csv", data["ripouts"]
     clean = " ".join(str(note or "").split())[:300]   # a missing note is blank, not "None"
-    rows = [(owner, unit_type, fid, int(fid in fitting_ids), clean if fid in fitting_ids else "")
-            for fid in unit_fittings]
-    pd.DataFrame(rows, columns=["owner_id", "unit_type", "fitting_id", "removed", "note"]).to_csv(
-        Path(data_dir) / "ripouts.csv", mode="a", header=False, index=False)
+    owner = owner_id or next_id(rip.owner_id, f"{unit_type}-O")
+    mine = rip.owner_id == owner
+    if mine.any():   # an owner we know: mark these fittings removed on their own rows
+        rip.loc[mine & rip.fitting_id.isin(fitting_ids), ["removed", "note"]] = [1, clean]
+        missing = [fid for fid in unit_fittings if fid not in set(rip.fitting_id[mine])]
+    else:
+        missing = unit_fittings
+    rows = [(owner, unit_type, fid, int(fid in fitting_ids), clean if fid in fitting_ids else "") for fid in missing]
+    new = pd.DataFrame(rows, columns=["owner_id", "unit_type", "fitting_id", "removed", "note"])
+    if mine.any():
+        pd.concat([rip, new], ignore_index=True).to_csv(path, index=False)
+    else:
+        new.to_csv(path, mode="a", header=False, index=False)
     return owner
 
 
