@@ -1,0 +1,200 @@
+{#- AI tagging  ·  /tagger?unit=T2S  ·  rendered by dashboard.tagger_page()
+    Type a messy renovation note: POST /api/tag (tagger.tag) highlights the words and
+    suggests fittings; "Add as a rip-out report" saves it with POST /api/report, which
+    updates the rip-out index. Also shows the tagger's honest held-out accuracy. -#}
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Right-Fit Homes · AI tagging</title>
+  <link rel="preload" href="{{ url_for('static', filename='fonts/fraunces.woff2') }}" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="{{ url_for('static', filename='fonts/figtree.woff2') }}" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
+</head>
+<body style="{{ advice_css }}">
+<div class="wrap">
+  {% set page = 'tagger' %}{% include '_topbar.html' %}
+
+  <header class="page-head">
+    <div>
+      <p class="kicker">AI tagging · where the rip-out data comes from</p>
+      <h1 class="headline">Owners write messy notes. <em>We turn them into data.</em></h1>
+      <p class="standfirst">Type a renovation note the way a real owner would, in English, Malay or Manglish.
+        The tagger finds which fittings were ripped out, and each report you add feeds the <b>rip-out index</b>.</p>
+      <span class="sim-badge" title="The sample notes are simulated."><i aria-hidden="true">!</i>Simulated data</span>
+    </div>
+    <div class="unit-picker">
+      <span class="label" id="unit-label">Reports are for</span>
+      <nav class="tabs" aria-labelledby="unit-label">
+        {% for code, label in unit_types.items() %}
+          <a href="?unit={{ code }}" class="{{ 'on' if code == unit else '' }}"
+             {% if code == unit %}aria-current="page"{% endif %}>{{ label }}</a>
+        {% endfor %}
+      </nav>
+    </div>
+  </header>
+
+  <div class="advisor-grid">
+    <section class="panel tag-panel" aria-labelledby="try-title">
+      <h2 id="try-title" class="panel-title">Try it</h2>
+      <label class="field-label" for="note">Renovation note</label>
+      <textarea id="note" rows="3" maxlength="500" spellcheck="false"
+                placeholder="e.g. hak semua kabinet dapur, tukar quartz top">{{ examples[0] }}</textarea>
+      <div class="ex-row" aria-label="Example notes">
+        <span class="ex-label">Examples:</span>
+        {% for e in examples %}<button type="button" class="ex" data-note="{{ e }}">{{ e }}</button>{% endfor %}
+      </div>
+
+      <div class="tag-out" aria-live="polite">
+        <p class="field-label">What the tagger read</p>
+        <p class="hl" id="hl"></p>
+        <p class="field-label">Fittings found</p>
+        <div id="tags" class="tag-list"></div>
+      </div>
+
+      <div class="tag-actions">
+        <button type="button" class="btn-primary small" id="add">Add as a rip-out report</button>
+        <span class="hint">Adds one owner's report for the {{ unit_types[unit] }}.</span>
+      </div>
+      <div id="added" aria-live="polite"></div>
+    </section>
+
+    <aside class="summary" aria-labelledby="acc-title">
+      <h2 id="acc-title">How accurate is it?</h2>
+      {% set h = ev.held_out %}
+      <p class="big">{{ '{:.0f}'.format(100 * h.correct / h.n) }}<small>%</small></p>
+      <p class="big-label">right on {{ h.n }} test notes the word lists were never tuned to</p>
+      <div class="sum-rows">
+        <div class="sum-row"><span>Demo sample notes</span><b>{{ '{:.0f}'.format(100 * ev.sample.correct / ev.sample.n) }}% of {{ ev.sample.n }}</b></div>
+        <div class="sum-row"><span>Notes used to tune the rules</span><b>{{ '{:.0f}'.format(100 * ev.tuning.correct / ev.tuning.n) }}% of {{ ev.tuning.n }}</b></div>
+        <p class="acc-note">Not fair tests: the word lists were written from these notes.</p>
+        {% if h.misses %}
+          <div class="sum-row"><span>Missed</span><b>{{ h.misses | length }} notes</b></div>
+          <ul class="misses">
+            {% for m in h.misses %}<li>“{{ m.note }}”</li>{% endfor %}
+          </ul>
+          <p class="acc-note">Slang the word lists don't know yet, which is exactly where an AI model helps.</p>
+        {% endif %}
+      </div>
+      <p class="fine-print">This is a keyword tagger: English, Malay and Manglish word lists plus a few rules.
+        It runs offline. Member 3 can swap in an AI model by replacing <code>tag()</code> in <code>tagger.py</code>.</p>
+    </aside>
+  </div>
+
+  <section class="section" aria-labelledby="recent-title">
+    <div class="section-head">
+      <h2 id="recent-title">Latest reports for this home type</h2>
+      <p>Each note, what the tagger made of it, and whether that matches the right answer.</p>
+    </div>
+    <div class="panel">
+      <table>
+        <thead><tr><th>Owner's note</th><th>Tagged as</th><th>Right answer</th><th>Match</th></tr></thead>
+        <tbody>
+        {% for s in samples %}
+          <tr>
+            <td>“{{ s.note }}”</td>
+            <td>{{ names.get(s.got, '—') if s.got else '—' }}</td>
+            <td>{{ s.truth_name }}</td>
+            <td>{% if s.got == s.truth %}<span class="badge keep"><span class="dot" aria-hidden="true">✓</span>Yes</span>
+                {% else %}<span class="badge stop"><span class="dot" aria-hidden="true">✕</span>No</span>{% endif %}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+</div>
+
+<script>
+  const UNIT = {{ unit | tojson }};
+  const noteEl = document.getElementById('note');
+  const hl = document.getElementById('hl');
+  const tagsEl = document.getElementById('tags');
+  const addBtn = document.getElementById('add');
+  const added = document.getElementById('added');
+  let current = { tags: [], spans: [] };
+  let timer = null, seq = 0;
+
+  const esc = s => s.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+  function highlight(text, spans) {
+    // Non-overlapping spans, earliest first; fitting words get a tint, removal words an underline.
+    let out = '', pos = 0;
+    for (const s of spans) {
+      if (s.start < pos) continue;
+      out += esc(text.slice(pos, s.start));
+      const cls = s.fitting_id === 'action' ? 'act' : 'fx fx-' + s.fitting_id;
+      const title = s.fitting_id === 'action' ? 'removal word' : s.fitting_id;
+      out += `<mark class="${cls}" title="${title}">${esc(text.slice(s.start, s.end))}</mark>`;
+      pos = s.end;
+    }
+    return out + esc(text.slice(pos));
+  }
+
+  function render(note, res) {
+    current = res;
+    hl.innerHTML = note.trim() ? highlight(note, res.spans) : '<span class="muted">Type a note above.</span>';
+    if (!res.tags.length) {
+      tagsEl.innerHTML = '<p class="muted">No tracked fittings found' + (note.trim() ? '. Try naming the item, e.g. "kabinet" or "wardrobe".' : '.') + '</p>';
+    } else {
+      tagsEl.innerHTML = res.tags.map(t => `
+        <div class="tag-card">
+          <span class="sw fx-${t.fitting_id}" aria-hidden="true"></span>
+          <div class="tag-body">
+            <b>${esc(t.name)}</b>
+            <small>${esc(t.reason)}</small>
+          </div>
+          <div class="conf" title="Confidence">
+            <span class="conf-bar"><span style="width:${Math.round(t.confidence * 100)}%"></span></span>
+            <small>${Math.round(t.confidence * 100)}% sure</small>
+          </div>
+        </div>`).join('');
+    }
+    addBtn.disabled = !res.tags.length;
+  }
+
+  async function run() {
+    const note = noteEl.value, my = ++seq;
+    try {
+      const res = await fetch('/api/tag', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ note, unit: UNIT }),
+      }).then(r => r.json());
+      if (my === seq) render(note, res);
+    } catch (e) {
+      tagsEl.innerHTML = '<p class="muted">Could not reach the tagger. Is the app running?</p>';
+    }
+  }
+
+  noteEl.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(run, 180); added.innerHTML = ''; });
+  document.querySelectorAll('.ex').forEach(b => b.addEventListener('click', () => {
+    noteEl.value = b.dataset.note; added.innerHTML = ''; run(); noteEl.focus();
+  }));
+
+  addBtn.addEventListener('click', async () => {
+    if (!current.tags.length) return;
+    addBtn.disabled = true;
+    const fittings = current.tags.map(t => t.fitting_id);
+    try {
+      const res = await fetch('/api/report', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ unit: UNIT, note: noteEl.value, fittings }),
+      });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.error || 'Could not save');
+      const lines = current.tags.map(t => `${esc(t.name)}: now <b>${body.rates[t.fitting_id]}%</b> of owners`).join('<br>');
+      added.innerHTML = `<div class="saved light">Saved as report <b>${body.owner_id}</b>.<br>${lines}<br>`
+        + `<a href="/dashboard?unit=${encodeURIComponent(UNIT)}">See the rip-out index →</a></div>`;
+    } catch (e) {
+      added.innerHTML = '';
+      const d = document.createElement('div'); d.className = 'error'; d.textContent = e.message; added.append(d);
+    } finally {
+      addBtn.disabled = !current.tags.length;
+    }
+  });
+
+  run();
+</script>
+</body>
+</html>
