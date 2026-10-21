@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 100">
+  <!-- Warm-white LED downlights: recessed fittings casting warm pools of light. Illustration, not a product photo. -->
+  <defs>
+    <linearGradient id="cone" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffd38f" stop-opacity=".75"/><stop offset="1" stop-color="#ffd38f" stop-opacity="0"/>
+    </linearGradient>
+    <radialGradient id="pool"><stop offset="0" stop-color="#ffcf86" stop-opacity=".7"/><stop offset="1" stop-color="#ffcf86" stop-opacity="0"/></radialGradient>
+    <radialGradient id="halo"><stop offset="0" stop-color="#fff4dc"/><stop offset="1" stop-color="#fff4dc" stop-opacity="0"/></radialGradient>
+  </defs>
+  <rect width="160" height="100" fill="#efe8dc"/>
+  <rect width="160" height="16" fill="#e4ddd0"/>
+  <rect y="82" width="160" height="18" fill="#e0d6c5"/>
+  <g>
+    <path d="M30 17h12l18 69H12z" fill="url(#cone)"/>
+    <path d="M74 17h12l18 69H56z" fill="url(#cone)"/>
+    <path d="M118 17h12l18 69h-48z" fill="url(#cone)"/>
+    <ellipse cx="36" cy="89" rx="26" ry="5" fill="url(#pool)"/>
+    <ellipse cx="80" cy="89" rx="26" ry="5" fill="url(#pool)"/>
+    <ellipse cx="124" cy="89" rx="26" ry="5" fill="url(#pool)"/>
+  </g>
+  <!-- sofa for scale -->
+  <rect x="52" y="62" width="56" height="10" rx="3" fill="#bdb4a1"/>
+  <rect x="50" y="70" width="60" height="13" rx="3" fill="#cbc2af"/>
+  <path d="M80 70v13" stroke="#b3a993" stroke-width=".8"/>
+  <!-- recessed fittings -->
+  <g>
+    <circle cx="36" cy="16" r="9" fill="url(#halo)"/><circle cx="80" cy="16" r="9" fill="url(#halo)"/><circle cx="124" cy="16" r="9" fill="url(#halo)"/>
+    <ellipse cx="36" cy="16" rx="6.5" ry="2" fill="#fffaf0" stroke="#c9c0b2" stroke-width=".8"/>
+    <ellipse cx="80" cy="16" rx="6.5" ry="2" fill="#fffaf0" stroke="#c9c0b2" stroke-width=".8"/>
+    <ellipse cx="124" cy="16" rx="6.5" ry="2" fill="#fffaf0" stroke="#c9c0b2" stroke-width=".8"/>
+  </g>
+</svg>
