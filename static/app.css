@@ -396,7 +396,7 @@ label.tag-card { cursor: pointer; }
 
 /* ---- Neighbour Match ---- */
 #map { width: 100%; height: auto; display: block; border-radius: 14px; }
-.map-label { font: 600 14px var(--text); fill: var(--ink-2); }
+.map-label { font: 600 14px var(--text); fill: var(--ink-2); paint-order: stroke; stroke: #edf0e1; stroke-width: 3px; stroke-linejoin: round; }
 .map-label.small { font-size: 12px; font-weight: 500; }
 .map-label.faded { opacity: .45; }
 .route { fill: none; stroke-width: 2.5; stroke-linecap: round; opacity: .85; }
@@ -405,10 +405,15 @@ label.tag-card { cursor: pointer; }
 .route-hit { fill: none; stroke: transparent; stroke-width: 16; cursor: pointer; pointer-events: stroke; }
 .home-from { fill: #fff; stroke: var(--ink-2); stroke-width: 1.5; cursor: pointer; }
 .home-from.unmatched { fill: #b3a996; stroke: #fff; }
+.home-to { stroke: #fff; stroke-width: 1.5; cursor: pointer; }
 .home-to.collected { fill: var(--forest-2); }
 .home-to.matched { fill: #d99a12; }
 .route-sel { fill: none; stroke: var(--terra); stroke-width: 4.5; stroke-linecap: round; }
-.van { fill: var(--terra); stroke: #fff; stroke-width: 2.5; }
+.van rect { fill: #d99a12; stroke: #fff; stroke-width: 1.2; }   /* a van on its way: amber like the route */
+.van .cab { fill: #a8740a; }
+.picked .van rect { fill: var(--terra); }                   /* the van on the route you picked */
+.picked .van .cab { fill: #8f3f22; }
+.van-dot { fill: var(--terra); stroke: #fff; stroke-width: 2.5; }
 .sel-from { fill: none; stroke: var(--terra); stroke-width: 2.5; }
 .sel-wait { fill: none; stroke: #6d6656; stroke-width: 2.5; stroke-dasharray: 3 3; }
 .sw.route-done { background: var(--forest-2); }
@@ -418,13 +423,43 @@ label.tag-card { cursor: pointer; }
 .pick b { color: var(--ink); }
 .pill { font-size: 12px; font-weight: 700; padding: 2px 8px; border-radius: 999px; white-space: nowrap; }
 /* neighbours looking for a fitting nobody has offered yet, and your own home */
-.home-ask { fill: #fff; stroke: var(--terra); stroke-width: 2; }
+.home-ask { fill: #fff; stroke: var(--terra); stroke-width: 2; cursor: pointer; }
 .sw.route-ask { background: #fff; box-shadow: inset 0 0 0 2px var(--terra); border-radius: 2px; }
 .home-you circle { fill: var(--terra); stroke: #fff; stroke-width: 3; }
 .you-label { fill: var(--terra); font-weight: 700; }
 .sw.route-you { background: var(--terra); border-radius: 50%; }
 .map-label.tiny { font-size: 11px; font-weight: 600; }
 .map-panel .wlegend { margin: 0 0 12px; }
+
+/* the township map: scenery, motion and hover cards */
+.faded-area { opacity: .36; }
+.scenery, .pulse, .float-up, .pop { pointer-events: none; }
+.route.draw { stroke-dasharray: var(--len); stroke-dashoffset: var(--len); }
+#map.in-view .route.draw { animation: route-draw 1.2s ease-out var(--delay) forwards; }
+@keyframes route-draw { to { stroke-dashoffset: 0; } }
+.route.matched { animation: route-march 1s linear infinite; }
+@keyframes route-march { to { stroke-dashoffset: -11; } }
+.pulse { fill: none; stroke-width: 2; transform-box: fill-box; transform-origin: center; animation: pulse 2.6s ease-out infinite; }
+.pulse.wait { stroke: #8f8673; }
+.pulse.ask, .pulse.you { stroke: var(--terra); }
+@keyframes pulse { from { transform: scale(1); opacity: .75; } to { transform: scale(3.2); opacity: 0; } }
+.pop { fill: none; stroke: var(--forest-2); stroke-width: 3; transform-box: fill-box; transform-origin: center;
+       animation: pop .9s ease-out forwards; }
+@keyframes pop { from { transform: scale(1); opacity: 1; } to { transform: scale(3.4); opacity: 0; } }
+.float-up { font: 700 13px var(--text); fill: var(--forest); paint-order: stroke; stroke: #fff; stroke-width: 4px;
+            stroke-linejoin: round; animation: float-up 2s ease-out forwards; }
+@keyframes float-up { from { transform: translateY(6px); opacity: 0; } 15% { opacity: 1; } to { transform: translateY(-16px); opacity: 0; } }
+.map-wrap { position: relative; }
+.map-tip { position: absolute; z-index: 2; pointer-events: none; max-width: 270px; padding: 9px 12px; border-radius: 12px;
+           background: var(--ink); color: var(--on-forest); font-size: 13px; line-height: 1.4;
+           box-shadow: 0 8px 22px rgba(28, 33, 29, .25); }
+.map-tip b { display: block; font-size: 14px; margin-bottom: 2px; }
+.map-tip span { display: block; color: #d5dcd2; }
+@media (prefers-reduced-motion: reduce) {
+  .pulse, .route.matched, .float-up, .pop, #map.in-view .route.draw { animation: none; }
+  .route.draw { stroke-dasharray: none; stroke-dashoffset: 0; }
+  .float-up { opacity: 1; }
+}
 
 /* ---- Neighbour Match community: who you are, the composer, the feed, the sidebar ---- */
 .visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden;
