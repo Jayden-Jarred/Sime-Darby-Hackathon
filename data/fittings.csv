@@ -1,0 +1,14 @@
+unit_type,fitting_id,name,eligibility,material,weight_kg,carbon_factor,install_cost_rm,removal_cost_rm,credit_rm,upgrade_margin_rm
+T2S,KIT-CAB,Kitchen cabinets,opt_out,Particleboard,330,0.664,8240,500,5770,1650
+T2S,KIT-TOP,Kitchen top,opt_out,Solid surface,82,0.7,2700,200,1890,540
+T2S,WRD-MST,Master bedroom wardrobe,opt_out,Particleboard,225,0.664,3840,300,2690,770
+T2S,WRD-BR2,Bedroom 2 wardrobe,opt_out,Particleboard,170,0.664,2880,250,2020,580
+T2S,LGT-DEC,Decorative light fittings,opt_out,Aluminium and glass,15,7.25,480,120,340,100
+T2S,TIL-FLR,Ground-floor tiles,upgrade_only,Ceramic tile,1800,0.796,13890,3700,0,2780
+T2S,SAN-BTH,Basins and toilets,fixed,Vitreous china,135,1.93,1200,300,0,0
+C3R,KIT-CAB,Kitchen cabinets,opt_out,Particleboard,265,0.664,6460,400,4520,1290
+C3R,KIT-TOP,Kitchen top,opt_out,Solid surface,66,0.7,2160,150,1510,430
+C3R,WRD-MST,Master bedroom wardrobe,opt_out,Particleboard,225,0.664,3840,300,2690,770
+C3R,LGT-DEC,Decorative light fittings,opt_out,Aluminium and glass,10,7.25,320,80,220,60
+C3R,TIL-FLR,Living-room tiles,upgrade_only,Ceramic tile,715,0.796,5490,1460,0,1100
+C3R,SAN-BTH,Basins and toilets,fixed,Vitreous china,90,1.93,800,200,0,0
