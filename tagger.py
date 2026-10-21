@@ -90,7 +90,9 @@ def _spans(rx, text):
 def tag(note, unit_type=None, fitting_ids=None):
     """
     Tag one note. Returns {"tags": [...], "spans": [...], "removal_word": bool}.
-    tags:  [{"fitting_id", "name", "confidence" (0-1), "reason"}], best first
+    tags:  [{"fitting_id", "name", "confidence" (0-1), "reason", "pick_one"}], best first.
+           pick_one: tags that share a value are alternatives for ONE item (a wardrobe,
+           room not stated): a report should keep only one of them. None otherwise.
     spans: [{"start", "end", "fitting_id"}] - which words led to each tag,
            as positions in the original note (for highlighting)
     fitting_ids: limit tags to these (e.g. the fittings a unit type has).
@@ -142,7 +144,11 @@ def tag(note, unit_type=None, fitting_ids=None):
             conf *= 0.75   # mentions the item but not that it was removed
         if conf >= THRESHOLD:
             tags.append({"fitting_id": fid, "name": NAMES[fid], "confidence": round(conf, 2),
-                         "reason": reason[fid] + ("" if removal else " (no removal word)")})
+                         "reason": reason[fid] + ("" if removal else " (no removal word)"),
+                         "pick_one": "wardrobe" if reason[fid] == "wardrobe, room not stated" else None})
+    if sum(t["pick_one"] == "wardrobe" for t in tags) < 2:   # one guess left: nothing to pick between
+        for t in tags:
+            t["pick_one"] = None
     tags.sort(key=lambda t: -t["confidence"])
     keep = {t["fitting_id"] for t in tags}
     spans = sorted({(s["start"], s["end"], s["fitting_id"]) for s in spans if s["fitting_id"] in keep})
