@@ -1,0 +1,264 @@
+"""
+Generate the SIMULATED data for the Right-Fit Homes demo.
+
+The owners, buyers, rip-out rates and Neighbour Match listings are made up.
+The fittings' weights, carbon factors and prices are realistic estimates from
+the public sources listed above FITTINGS, with the working beside each row.
+Re-run any time:
+
+    python generate_dummy_data.py
+
+It writes five CSV files into data/. Column meanings are in README.md.
+The random seed is fixed, so the same data comes out every run.
+To refresh only the fittings and upgrade options (keeping rip-out reports
+and buyer choices added through the app):
+
+    python -c "import generate_dummy_data as g; g.write_fittings(); g.write_upgrades()"
+"""
+
+import csv
+import random
+from pathlib import Path
+
+random.seed(42)
+DATA = Path(__file__).parent / "data"
+DATA.mkdir(exist_ok=True)
+
+UNIT_TYPES = {
+    "T2S": "Double-storey terrace 20' x 70'",
+    "C3R": "3-room condominium",
+}
+
+# ---- Where the fitting numbers come from (README.md lists these too) ---------
+# [1] ICE Database v4, Circular Ecology (2024), cradle to gate, as listed on
+#     Climatiq (the ICE spreadsheet itself needs a free sign-up at
+#     https://circularecology.com). kg CO2e per kg:
+#       particle board 0.664 (excluding stored carbon)   ceramic tile 0.796
+#       sanitary ceramic 1.93   glass 1.437   aluminium (world average) 13.06
+#     e.g. https://www.climatiq.io/data/emission-factor/ca3be708-df0d-47a2-9e51-43cf139ebfd8 (tile)
+#          https://www.climatiq.io/data/emission-factor/218eace7-6add-4bcf-b571-b464ac924dfd (sanitary)
+# [2] No open ICE or EPD factor for acrylic solid surface, so a stand-in: DuPont
+#     quartz worktop EPD (UL Environment, 2017), 42.4 kg CO2e/m2 at 61 kg/m2
+#     = 0.70 kg CO2e/kg. Acrylic is likely higher, so this undercounts (on purpose:
+#     we'd rather understate carbon).
+#     https://materials.oneclicklca.com/en/material/quartz-countertop/66475d82e18244544f8d7be7
+# [3] recommend.my, "Types of kitchen cabinet materials in Malaysia", 29 Sep 2024:
+#     melamine (chipboard) from RM220/ft run wall, RM280/ft run base cabinets.
+#     https://recommend.my/blog/?p=9822
+# [4] recommend.my, "A Basic Guide on Solid Surface Countertops", 29 Sep 2024:
+#     solid surface RM135-245/ft run. https://recommend.my/blog/?p=8605
+# [5] recommend.my, "11 Custom Made Melamine Wardrobes for under RM4000",
+#     29 Sep 2024: 2400 x 600 x 2700 mm melamine wardrobe from RM3,840.
+#     https://recommend.my/blog/?p=18334
+# [6] Qanvast, "How Much Does It Cost To Renovate In Malaysia?", 8 Dec 2025:
+#     tiles RM15-24/sqft installed, hacking RM3-6/sqft, pendant light from RM80,
+#     toilet bowl RM250-400, sink and tap RM150-300.
+#     https://qanvast.com/my/articles/how-much-does-it-cost-to-renovate-in-malaysia-928
+# SDP's prices use the LOW end of each range: SDP buys in bulk, so likely pays less.
+# Tile hacking is a removal cost the owner pays, with no bulk discount, so it
+# uses RM4/sqft, inside the RM3-6 range [6].
+# Weights are our estimates: 18 mm particleboard at ~650 kg/m3 (11.7 kg/m2,
+# so a 600 mm base unit ~22 kg, a wall unit ~18 kg); 9 mm porcelain tile
+# ~21 kg/m2; 12 mm solid surface at ~1,700 kg/m3 + 10% for edges; a toilet
+# ~30 kg, a basin ~15 kg, a pendant ~2.5 kg. Removal costs are our
+# assumptions (labour + a disposal trip) except tiles, from the hacking rate [6].
+CREDIT_SHARE = 0.70   # assumption: SDP gives a buyer who opts out 70% of the install cost it saves
+MARGIN_SHARE = 0.20   # assumption: SDP's margin on the default upgrade = 20% of the standard item's install cost
+
+# One row per fitting per unit type.
+# eligibility: opt_out = buyer can keep / opt out / upgrade
+#              upgrade_only = buyer can keep / upgrade (e.g. tiles)
+#              fixed = always installed (needed for handover)
+# credit_rm and upgrade_margin_rm are worked out from the shares above (fitting_rows()).
+FITTINGS = [
+    # unit, id,       name,                         eligibility,   material,         kg,    factor, install, removal
+    # 10 base units x 22 kg + 6 wall units x 18 kg; 20 ft base x RM280 + 12 ft wall x RM220 [3]
+    ("T2S", "KIT-CAB", "Kitchen cabinets",           "opt_out",      "Particleboard",   330,  0.664,  8240,  500),
+    # 20 ft x 0.6 m of 12 mm solid surface; 20 ft x RM135 [4]; factor [2]
+    ("T2S", "KIT-TOP", "Kitchen top",                "opt_out",      "Solid surface",    82,  0.70,   2700,  200),
+    # 2.4 m full-height, ~19 m2 of board; RM3,840 [5]
+    ("T2S", "WRD-MST", "Master bedroom wardrobe",    "opt_out",      "Particleboard",   225,  0.664,  3840,  300),
+    # 1.8 m, ~14.6 m2 of board; RM3,840 x 1.8 / 2.4 [5]
+    ("T2S", "WRD-BR2", "Bedroom 2 wardrobe",         "opt_out",      "Particleboard",   170,  0.664,  2880,  250),
+    # 6 pendants x 2.5 kg; factor = half aluminium, half glass [1]; 6 x RM80 [6]
+    ("T2S", "LGT-DEC", "Decorative light fittings",  "opt_out",      "Aluminium and glass", 15, 7.25,  480,  120),
+    # 86 m2 ground floor (926 sqft) x 21 kg/m2; factor [1]; 926 sqft x RM15 installed, hacking 926 x RM4 [6]
+    ("T2S", "TIL-FLR", "Ground-floor tiles",         "upgrade_only", "Ceramic tile",   1800,  0.796, 13890, 3700),
+    # 3 bathrooms: 3 x (30 + 15 kg); factor [1]; 3 x RM250 toilet + 3 x RM150 basin [6]
+    ("T2S", "SAN-BTH", "Basins and toilets",         "fixed",        "Vitreous china",  135,  1.93,   1200,  300),
+    # 8 base units x 22 kg + 5 wall units x 18 kg; 16 ft base x RM280 + 9 ft wall x RM220 [3]
+    ("C3R", "KIT-CAB", "Kitchen cabinets",           "opt_out",      "Particleboard",   265,  0.664,  6460,  400),
+    # 16 ft x 0.6 m of 12 mm solid surface; 16 ft x RM135 [4]; factor [2]
+    ("C3R", "KIT-TOP", "Kitchen top",                "opt_out",      "Solid surface",    66,  0.70,   2160,  150),
+    # the same 2.4 m full-height wardrobe as T2S: ~19 m2 of board; RM3,840 [5]
+    ("C3R", "WRD-MST", "Master bedroom wardrobe",    "opt_out",      "Particleboard",   225,  0.664,  3840,  300),
+    # 4 pendants x 2.5 kg; factor as T2S [1]; 4 x RM80 [6]
+    ("C3R", "LGT-DEC", "Decorative light fittings",  "opt_out",      "Aluminium and glass", 10, 7.25,  320,   80),
+    # 34 m2 living/dining/kitchen (366 sqft) x 21 kg/m2; factor [1]; 366 x RM15, hacking 366 x RM4 [6]
+    ("C3R", "TIL-FLR", "Living-room tiles",          "upgrade_only", "Ceramic tile",    715,  0.796,  5490, 1460),
+    # 2 bathrooms: 2 x (30 + 15 kg); factor [1]; 2 x RM250 + 2 x RM150 [6]
+    ("C3R", "SAN-BTH", "Basins and toilets",         "fixed",        "Vitreous china",   90,  1.93,    800,  200),
+]
+
+
+def fitting_rows():
+    """FITTINGS plus credit_rm and upgrade_margin_rm, as written to fittings.csv."""
+    rows = []
+    for unit, fid, name, elig, material, kg, factor, install, removal in FITTINGS:
+        credit = round(install * CREDIT_SHARE, -1) if elig == "opt_out" else 0
+        margin = round(install * MARGIN_SHARE, -1) if elig != "fixed" else 0
+        rows.append((unit, fid, name, elig, material, kg, factor, install, removal, int(credit), int(margin)))
+    return rows
+
+
+# What a buyer can upgrade each fitting to: (upgrade_id, name, description,
+# SDP margin as a multiple of the fitting's upgrade_margin_rm). The first
+# option is the default and matches upgrade_margin_rm. The multiples are
+# assumptions: a pricier option (aluminium, sintered stone) earns SDP more.
+# Each option's picture is static/upgrades/<upgrade_id in lower case>.svg
+# (drawn illustrations); point the image column at a real photo to swap one.
+UPGRADES = {
+    "KIT-CAB": [("PLYWOOD", "Plywood cabinets", "Moisture-resistant plywood, soft-close doors", 1.0),
+                ("ALUMINIUM", "Aluminium cabinets", "Waterproof and termite-proof", 1.3)],
+    "KIT-TOP": [("QUARTZ", "Quartz top", "20 mm quartz with an undermount sink", 1.0),
+                ("GRANITE", "Granite top", "Polished natural granite", 0.8),
+                ("SINTERED", "Sintered stone top", "Heat- and scratch-proof, slim edge", 1.5)],
+    "WRD-MST": [("SLIDING", "Full-height sliding wardrobe", "Floor to ceiling, mirrored sliding doors", 1.0),
+                ("WALK-IN", "Open walk-in system", "Open shelves, drawers and hanging rails", 1.2)],
+    "WRD-BR2": [("SLIDING", "Full-height sliding wardrobe", "Floor to ceiling, mirrored sliding doors", 1.0),
+                ("STUDY", "Wardrobe with study desk", "Smaller wardrobe plus a built-in desk", 1.1)],
+    "LGT-DEC": [("LED-WARM", "Warm-white LED downlights", "Recessed and energy-saving", 1.0),
+                ("SMART", "Smart dimmable lights", "Dim from the app or the switch", 1.6)],
+    "TIL-FLR": [("HOMOGENEOUS", "Large homogeneous tiles", "600 x 1200 mm polished porcelain", 1.0),
+                ("VINYL", "SPC vinyl plank", "Wood look, waterproof, warmer underfoot", 0.9)],
+}
+
+# Simulated share of owners who rip each fitting out after handover.
+RIPOUT_RATE = {
+    ("T2S", "KIT-CAB"): 0.62, ("T2S", "KIT-TOP"): 0.55, ("T2S", "WRD-MST"): 0.46,
+    ("T2S", "WRD-BR2"): 0.31, ("T2S", "LGT-DEC"): 0.40, ("T2S", "TIL-FLR"): 0.22,
+    ("T2S", "SAN-BTH"): 0.08,
+    ("C3R", "KIT-CAB"): 0.38, ("C3R", "KIT-TOP"): 0.35, ("C3R", "WRD-MST"): 0.52,
+    ("C3R", "LGT-DEC"): 0.27, ("C3R", "TIL-FLR"): 0.12, ("C3R", "SAN-BTH"): 0.05,
+}
+
+# Messy free-text notes, the kind owners actually write.
+# Member 3's AI tagging should turn these back into the fitting_id.
+NOTES = {
+    "KIT-CAB": ["hacked out all kitchen cabinet, redo full kitchen",
+                "kabinet dapur tukar baru", "changed kitchen cabinets to aluminium",
+                "removed upper and lower cabinets, contractor install new"],
+    "KIT-TOP": ["kitchen top change to quartz", "hacked out kitchen top",
+                "replace worktop with granite", "tukar kitchen top"],
+    "WRD-MST": ["master room wardrobe removed, built in new one",
+                "change wardrobe in master bedroom", "almari master bilik buang"],
+    "WRD-BR2": ["small room wardrobe remove", "bedroom 2 almari tukar",
+                "removed wardrobe in 2nd room for study table"],
+    "LGT-DEC": ["changed all lights to LED downlight", "lampu tukar semua",
+                "remove ceiling lights install new"],
+    "TIL-FLR": ["retile ground floor", "change floor tiles to vinyl",
+                "hack floor tiles downstairs, new homogeneous tiles"],
+    "SAN-BTH": ["changed toilet bowl", "replace basin in common bathroom"],
+}
+
+
+def write(name, header, rows):
+    with open(DATA / name, "w", newline="", encoding="utf-8") as f:
+        w = csv.writer(f)
+        w.writerow(header)
+        w.writerows(rows)
+
+
+def write_upgrades():
+    """upgrades.csv: one row per upgrade option per fitting per unit type.
+    On its own (python -c "import generate_dummy_data as g; g.write_upgrades()")
+    it refreshes the options without resetting the rest of the data."""
+    upgrades = [(unit, fid, uid, name, desc, round(margin * mult / 10) * 10, f"upgrades/{uid.lower()}.svg")
+                for unit, fid, *_, margin in fitting_rows()
+                for uid, name, desc, mult in UPGRADES.get(fid, [])]
+    write("upgrades.csv",
+          ["unit_type", "fitting_id", "upgrade_id", "name", "description", "margin_rm", "image"], upgrades)
+    return upgrades
+
+
+def write_fittings():
+    """fittings.csv. On its own (see the module docstring) it refreshes the
+    numbers without resetting the rest of the data."""
+    write("fittings.csv",
+          ["unit_type", "fitting_id", "name", "eligibility", "material",
+           "weight_kg", "carbon_factor", "install_cost_rm",
+           "removal_cost_rm", "credit_rm", "upgrade_margin_rm"],
+          fitting_rows())
+
+
+def main():
+    write_fittings()
+    upgrades = write_upgrades()
+
+    # ripouts.csv: one row per owner per fitting.
+    ripouts = []
+    for unit, owners in (("T2S", 150), ("C3R", 100)):
+        unit_fittings = [f[1] for f in FITTINGS if f[0] == unit]
+        for n in range(1, owners + 1):
+            owner = f"{unit}-O{n:03d}"
+            for fid in unit_fittings:
+                removed = random.random() < RIPOUT_RATE[(unit, fid)]
+                note = random.choice(NOTES[fid]) if removed else ""
+                ripouts.append((owner, unit, fid, int(removed), note))
+    write("ripouts.csv",
+          ["owner_id", "unit_type", "fitting_id", "removed", "note"], ripouts)
+
+    # choices.csv: what NEW buyers pick in the Fit-Out Advisor.
+    # Assumption: buyers who would have ripped an item out mostly act on it.
+    # Upgrade picks use their own random stream, so the rest of the data
+    # comes out the same as before upgrade options existed.
+    pick_upgrade = random.Random(7)
+    choices = []
+    for unit, buyers in (("T2S", 100), ("C3R", 60)):
+        eligible = [f for f in FITTINGS if f[0] == unit and f[3] != "fixed"]
+        for n in range(1, buyers + 1):
+            buyer = f"{unit}-B{n:03d}"
+            for f in eligible:
+                fid, elig = f[1], f[3]
+                upgrade_id = ""
+                if random.random() < RIPOUT_RATE[(unit, fid)] * 0.8:
+                    if elig == "upgrade_only" or random.random() < 0.4:
+                        choice = "upgrade"
+                        upgrade_id = pick_upgrade.choice(UPGRADES[fid])[0]
+                    else:
+                        choice = "opt_out"
+                else:
+                    choice = "keep"
+                choices.append((buyer, unit, fid, choice, upgrade_id))
+    write("choices.csv",
+          ["buyer_id", "unit_type", "fitting_id", "choice", "upgrade_id"], choices)
+
+    # matches.csv: Neighbour Match listings (removed items offered to
+    # owners of the same unit type nearby).
+    matches = []
+    # Hacked-out tiles break, and toilets/basins aren't offered for hygiene
+    # reasons, so only reusable fittings get listed.
+    removed_rows = [r for r in ripouts if r[3] == 1 and r[2] not in ("TIL-FLR", "SAN-BTH")]
+    for n, (owner, unit, fid, _, _) in enumerate(random.sample(removed_rows, 40), 1):
+        roll = random.random()
+        if roll < 0.6:
+            status = "collected"
+        elif roll < 0.75:
+            status = "matched"
+        else:
+            status = "unmatched"
+        to_owner = "" if status == "unmatched" else f"{unit}-B{random.randint(1, 60):03d}"
+        # Condo neighbours are in nearby towers; terrace neighbours across the township.
+        far = 1.4 if unit == "C3R" else 3.0
+        distance = round(random.uniform(0.2, far), 1) if to_owner else ""
+        matches.append((f"L{n:03d}", owner, unit, fid, to_owner, distance, status))
+    write("matches.csv",
+          ["listing_id", "from_owner", "unit_type", "fitting_id",
+           "to_owner", "distance_km", "status"], matches)
+
+    print(f"Wrote {len(FITTINGS)} fittings, {len(upgrades)} upgrade options, {len(ripouts)} rip-out rows, "
+          f"{len(choices)} choices, {len(matches)} listings to {DATA}/")
+
+
+if __name__ == "__main__":
+    main()
