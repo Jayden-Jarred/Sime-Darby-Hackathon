@@ -8,8 +8,11 @@ Re-run any time:
 
     python generate_dummy_data.py
 
-It writes five CSV files into data/. Column meanings are in README.md.
-The random seed is fixed, so the same data comes out every run.
+It writes seven CSV files into data/. Column meanings are in README.md.
+The random seed is fixed, so the same data comes out every run: that is
+what the dashboard's "Reset demo data" button (POST /api/reset-demo) does.
+Only the Neighbour Match dates move: they count back from the hour you run
+it, so the community feed always looks recent in a demo.
 To refresh only the fittings and upgrade options (keeping rip-out reports
 and buyer choices added through the app):
 
@@ -18,9 +21,13 @@ and buyer choices added through the app):
 
 import csv
 import random
+from datetime import datetime, timedelta
 from pathlib import Path
 
-random.seed(42)
+import impact
+import neighbour_match
+
+SEED = 42
 DATA = Path(__file__).parent / "data"
 DATA.mkdir(exist_ok=True)
 
@@ -161,6 +168,55 @@ NOTES = {
     "SAN-BTH": ["changed toilet bowl", "replace basin in common bathroom"],
 }
 
+# Neighbour Match posts: what owners write when they offer a fitting, and what
+# neighbours write when they ask. Simulated, in the same English/Malay mix.
+OFFER_NOTES = {
+    "KIT-CAB": ["Base and wall units, white melamine. All doors and hinges included. We went for an island kitchen.",
+                "Kabinet dapur masih elok, cuma tukar konsep. Ambil sendiri ya.",
+                "Two years old, no water damage under the sink. Free to a neighbour with the same layout!",
+                "Taken down carefully and numbered, so it goes back up easily."],
+    "KIT-TOP": ["Solid-surface top in one piece, with the sink cut-out. A few light scratches.",
+                "We changed to granite. This top is still in good shape.",
+                "Top kabinet dapur, warna putih. Perlu 2 orang untuk angkat."],
+    "WRD-MST": ["Full-height master wardrobe, taken apart neatly. Shelves and rails included.",
+                "Almari bilik utama, masih cantik. Kami pasang walk-in.",
+                "Doors work fine, one handle missing. Fits the standard master bedroom wall."],
+    "WRD-BR2": ["Bedroom 2 wardrobe, light oak finish. Used by our kid for a year.",
+                "Turned bedroom 2 into a study, so this has to go. Good condition.",
+                "Almari bilik kedua, tak pernah rosak. Free!"],
+    "LGT-DEC": ["The standard pendant lights, bulbs included.",
+                "Changed to downlights. All the pendants work, boxed up.",
+                "Lampu hiasan, semua berfungsi. Ambil semua sekali."],
+}
+ASK_NOTES = {
+    "KIT-CAB": ["Moving in next month and would love a ready kitchen.",
+                "Looking for kitchen cabinets, happy to collect and refit myself."],
+    "KIT-TOP": ["Looking for a worktop to go with second-hand cabinets.",
+                "Need a top for our kitchen, any colour is fine."],
+    "WRD-MST": ["Need a wardrobe for the master bedroom before we move in.",
+                "Ada sesiapa nak bagi almari bilik utama? Boleh ambil sendiri."],
+    "WRD-BR2": ["Looking for a wardrobe for our son's room.",
+                "Need one for bedroom 2, the standard size."],
+    "LGT-DEC": ["Any spare pendant lights? Two of ours broke in the move.",
+                "Looking for the original pendants to match the rest of the house."],
+}
+CONDITION_WEIGHTS = {"Like new": 3, "Good": 5, "Fair": 2}
+# (neighbour taking it, giver) before the pickup
+PICKUP_CHAT = [("Is it still available? Can I collect this weekend?", "Yes! Saturday morning works, text me when you're here."),
+               ("Thank you! What time is good for pickup?", "Any evening after 7pm. I'll leave it at the porch."),
+               ("Boleh saya ambil hari Sabtu?", "Boleh, datang pukul 10 pagi ya."),
+               ("Does it come with the screws and hinges?", "Yes, all in a bag taped to the back.")]
+# (a neighbour asking about a waiting offer, the giver's answer)
+QUESTIONS = [("Is it the white or the grey finish?", "White, same as the show unit."),
+             ("Any damage on the doors?", "Just a small scratch on one door, hardly visible."),
+             ("Still there? I might need one next month.", "Still here! Ask for it when you're ready.")]
+REQUEST_REPLIES = ["I'm renovating in December, I'll post mine then!",
+                   "Same here, following this one.",
+                   "Ours comes out next month, will offer it here."]
+THANKS = ["Fits perfectly, thank you so much!", "Terima kasih! Dah pasang, macam baru.",
+          "Saved us weeks of waiting for a carpenter. Thanks, neighbour!", "Installed it the same day. Thank you!"]
+STAMP = "%Y-%m-%d %H:%M"
+
 
 def write(name, header, rows):
     with open(DATA / name, "w", newline="", encoding="utf-8") as f:
@@ -192,6 +248,7 @@ def write_fittings():
 
 
 def main():
+    random.seed(SEED)   # every run, so a reset always gives the same demo data
     write_fittings()
     upgrades = write_upgrades()
 
@@ -233,31 +290,77 @@ def main():
     write("choices.csv",
           ["buyer_id", "unit_type", "fitting_id", "choice", "upgrade_id"], choices)
 
-    # matches.csv: Neighbour Match listings (removed items offered to
-    # owners of the same unit type nearby).
-    matches = []
-    # Hacked-out tiles break, and toilets/basins aren't offered for hygiene
-    # reasons, so only reusable fittings get listed.
-    removed_rows = [r for r in ripouts if r[3] == 1 and r[2] not in ("TIL-FLR", "SAN-BTH")]
-    for n, (owner, unit, fid, _, _) in enumerate(random.sample(removed_rows, 40), 1):
-        roll = random.random()
-        if roll < 0.6:
-            status = "collected"
-        elif roll < 0.75:
-            status = "matched"
+    # matches.csv + requests.csv + messages.csv: Neighbour Match. Owners offer
+    # reusable fittings they removed and buyers of the same home type ask for
+    # them, in a random order over six weeks, and each goes through the app's own
+    # functions (neighbour_match.py), so the starting data follows exactly the
+    # rules the live app uses. Most matched fittings have been collected; some
+    # posts have a chat, and some pick-ups a thank-you.
+    write("matches.csv", ["listing_id", "from_owner", "unit_type", "fitting_id", "to_owner", "distance_km",
+                          "status", "condition", "note", "posted_at", "matched_at", "collected_at"], [])
+    write("requests.csv", ["request_id", "requester", "unit_type", "fitting_id", "status", "listing_id",
+                           "note", "posted_at"], [])
+    write("messages.csv", ["message_id", "post_id", "author", "kind", "text", "posted_at"], [])
+    reusable_removed = [(o, u, f) for o, u, f, removed, _ in ripouts if removed and f not in impact.NOT_REUSABLE]
+    events = [("list", *row) for row in random.sample(reusable_removed, 40)]
+    for unit, buyers, asks in (("T2S", 100, 20), ("C3R", 60, 12)):
+        reusable = [f[1] for f in FITTINGS if f[0] == unit and f[1] not in impact.NOT_REUSABLE]
+        events += [("ask", f"{unit}-B{random.randint(1, buyers):03d}", unit, random.choice(reusable))
+                   for _ in range(asks)]
+    random.shuffle(events)
+    end = datetime.now().replace(minute=0, second=0, microsecond=0) - timedelta(hours=2)
+    step = timedelta(days=42) / len(events)
+
+    def at(t):
+        return t.strftime(STAMP)
+
+    def talk(post, who, text, t):   # a message, if its time has come
+        if t < end:
+            neighbour_match.comment(post, who, text, now=at(t))
+
+    matched = []
+    for i, (kind, person, unit, fid) in enumerate(events):
+        when = end - timedelta(days=42) + step * i + timedelta(minutes=random.randint(0, 240))
+        if kind == "list":
+            condition = random.choices(list(CONDITION_WEIGHTS), list(CONDITION_WEIGHTS.values()))[0]
+            listing = neighbour_match.list_item(unit, person, fid, condition=condition,
+                                                note=random.choice(OFFER_NOTES[fid]), now=at(when))
         else:
-            status = "unmatched"
-        to_owner = "" if status == "unmatched" else f"{unit}-B{random.randint(1, 60):03d}"
-        # Condo neighbours are in nearby towers; terrace neighbours across the township.
-        far = 1.4 if unit == "C3R" else 3.0
-        distance = round(random.uniform(0.2, far), 1) if to_owner else ""
-        matches.append((f"L{n:03d}", owner, unit, fid, to_owner, distance, status))
-    write("matches.csv",
-          ["listing_id", "from_owner", "unit_type", "fitting_id",
-           "to_owner", "distance_km", "status"], matches)
+            try:
+                listing = neighbour_match.request_item(unit, person, fid, note=random.choice(ASK_NOTES[fid]),
+                                                       now=at(when))[1]
+            except ValueError:   # this buyer already asked for one
+                continue
+        if listing and listing["status"] == "matched":
+            matched.append((listing, when))
+    for listing, when in matched:
+        pickup = when + timedelta(hours=random.randint(12, 96))
+        if random.random() < 0.6:
+            ask, answer = random.choice(PICKUP_CHAT)
+            talk(listing["listing_id"], listing["to_owner"], ask, when + timedelta(hours=2))
+            talk(listing["listing_id"], listing["from_owner"], answer, when + timedelta(hours=5))
+        if pickup < end and random.random() < 0.75:
+            thanks = random.choice(THANKS) if random.random() < 0.7 else ""
+            neighbour_match.collect(listing["listing_id"], by=listing["to_owner"], thanks=thanks, now=at(pickup))
+    data = impact.load_data()
+    m, req = data["matches"], data["requests"]
+    for r in m[m.status == "unmatched"].itertuples():   # questions on offers still waiting
+        if random.random() < 0.4:
+            asker = f"{r.unit_type}-B{random.randint(1, 100 if r.unit_type == 'T2S' else 60):03d}"
+            ask, answer = random.choice(QUESTIONS)
+            posted = datetime.strptime(r.posted_at, STAMP)
+            talk(r.listing_id, asker, ask, posted + timedelta(hours=random.randint(3, 30)))
+            talk(r.listing_id, r.from_owner, answer, posted + timedelta(hours=random.randint(31, 40)))
+    for r in req[req.status == "open"].itertuples():    # owners answering open requests
+        if random.random() < 0.5:
+            owner = f"{r.unit_type}-O{random.randint(1, 150 if r.unit_type == 'T2S' else 100):03d}"
+            talk(r.request_id, owner, random.choice(REQUEST_REPLIES),
+                 datetime.strptime(r.posted_at, STAMP) + timedelta(hours=random.randint(2, 48)))
+    data = impact.load_data()
 
     print(f"Wrote {len(FITTINGS)} fittings, {len(upgrades)} upgrade options, {len(ripouts)} rip-out rows, "
-          f"{len(choices)} choices, {len(matches)} listings to {DATA}/")
+          f"{len(choices)} choices, {len(data['matches'])} listings, {len(data['requests'])} requests, "
+          f"{len(data['messages'])} messages to {DATA}/")
 
 
 if __name__ == "__main__":
