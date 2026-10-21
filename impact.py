@@ -381,19 +381,25 @@ def reuse_carbon_kg(weight_kg, carbon_factor, distance_km):
 
 
 def reuse_summary(data, unit_type=None):
-    """How many listed items were rehomed, and the net carbon saved."""
-    m = data["matches"]
+    """
+    Neighbour Match results. reuse_rate is the proposal's KPI: the share of
+    removed items rehomed, i.e. fittings collected by a neighbour out of every
+    reusable fitting owners reported removing (listed on Neighbour Match or not).
+    Carbon counts only collected fittings, minus their delivery trips.
+    """
+    m, r = data["matches"], data["ripouts"]
     if unit_type:
-        m = m[m.unit_type == unit_type]
-    listed = len(m)
+        m, r = m[m.unit_type == unit_type], r[r.unit_type == unit_type]
+    removed = int(((r.removed == 1) & ~r.fitting_id.isin(NOT_REUSABLE)).sum())
     collected = m[m.status == "collected"].merge(
         data["fittings"], on=["unit_type", "fitting_id"], how="left")
     carbon_saved = reuse_carbon_kg(collected.weight_kg, collected.carbon_factor,
                                    collected.distance_km.astype(float)).sum()
     return {
-        "listed": listed,
+        "removed": removed,
+        "listed": len(m),
         "collected": len(collected),
-        "reuse_rate": (len(collected) / listed) if listed else 0.0,
+        "reuse_rate": (len(collected) / removed) if removed else 0.0,
         "material_reused_kg": float(collected.weight_kg.sum()),
         "carbon_saved_kg": float(carbon_saved),
     }
@@ -407,14 +413,20 @@ def ripout_rates(data, unit_type=None):
 
 
 def choice_impacts(data, unit_type=None):
-    """impact_of() applied to every buyer choice, as one table (carbon only for often-removed fittings)."""
+    """
+    impact_of() applied to every buyer choice, as one table (carbon only for often-removed fittings).
+    Each distinct (home type, fitting, choice, upgrade) is worked out once and shared by every
+    buyer who made it, so the dashboard stays quick however many buyers confirm.
+    """
     c = data["choices"]
     if unit_type:
         c = c[c.unit_type == unit_type]
     rates = ripout_rates(data, unit_type)
-    rows = [impact_of(data["fittings"], u, f, ch, up or None, data["upgrades"], rates.get((u, f)))
-            for u, f, ch, up in zip(c.unit_type, c.fitting_id, c.choice, c.upgrade_id)]
-    return pd.DataFrame(rows)
+    worked = {}
+    for key in set(zip(c.unit_type, c.fitting_id, c.choice, c.upgrade_id)):
+        u, f, ch, up = key
+        worked[key] = impact_of(data["fittings"], u, f, ch, up or None, data["upgrades"], rates.get((u, f)))
+    return pd.DataFrame([worked[key] for key in zip(c.unit_type, c.fitting_id, c.choice, c.upgrade_id)])
 
 
 def impact_by_fitting(data, unit_type=None):
