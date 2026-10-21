@@ -55,7 +55,9 @@
 
       <div class="tag-actions">
         <button type="button" class="btn-primary small" id="add">Add as a rip-out report</button>
-        <span class="hint">Adds one owner's report for the {{ unit_types[unit] }}.</span>
+        <span class="hint">{% if saving_as %}Adds to <b>{{ saving_as.name }}</b>'s rip-out report ({{ saving_as.home }}).
+          {% else %}Adds a new owner's report for the {{ unit_types[unit] }}.
+          <a class="inline-link" href="{{ url_for('dashboard.signin', unit=unit) }}">Sign in as a homeowner</a> to add to theirs.{% endif %}</span>
       </div>
       <div id="added" aria-live="polite"></div>
     </section>
@@ -204,7 +206,7 @@
       const lines = fittings.map(f => `${name(f)}: now <b>${body.rates[f]}%</b> of owners`).join('<br>');
       const offers = fittings.filter(f => REUSABLE.includes(f)).map(f =>
         `<button type="button" class="ex offer" data-fitting="${f}">Offer the ${name(f).toLowerCase()} to neighbours</button>`).join('');
-      added.innerHTML = `<div class="saved light">Saved as report <b>${body.owner_id}</b>.<br>${lines}<br>`
+      added.innerHTML = `<div class="saved light">${body.name ? `Saved to <b>${esc(body.name)}</b>'s rip-out report` : `Saved as report <b>${body.owner_id}</b>`}.<br>${lines}<br>`
         + `<a href="/dashboard?unit=${encodeURIComponent(UNIT)}">See the rip-out index →</a>`
         + (offers ? `<div class="offer-row">${offers}</div>` : '') + '</div>';
       added.dataset.owner = body.owner_id;
