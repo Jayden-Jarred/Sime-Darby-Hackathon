@@ -35,12 +35,6 @@ CONDITIONS = ("Like new", "Good", "Fair")
 MAX_TEXT = 280   # characters in a note, a message or a thank-you
 
 
-def _next_id(ids, prefix):
-    """L041 after L040 (R... for requests, M... for messages)."""
-    nums = [int(i[len(prefix):]) for i in ids if isinstance(i, str) and i.startswith(prefix)]
-    return f"{prefix}{max(nums, default=0) + 1:03d}"
-
-
 def _stamp(now):
     """The time saved on a post: `now` if given (the generator passes simulated times), else the clock."""
     return now or datetime.now().strftime("%Y-%m-%d %H:%M")
@@ -101,12 +95,13 @@ def _save(df, name, data_dir):
 
 def _add_message(data, data_dir, post_id, author, kind, text, now):
     msgs = data["messages"]
-    msg = {"message_id": _next_id(msgs.message_id, "M"), "post_id": post_id, "author": author,
+    msg = {"message_id": impact.next_id(msgs.message_id, "M"), "post_id": post_id, "author": author,
            "kind": kind, "text": text, "posted_at": _stamp(now)}
     _save(pd.concat([msgs, pd.DataFrame([msg])], ignore_index=True), "messages.csv", data_dir)
     return msg
 
 
+@impact.locked   # each step reads, changes and saves the CSVs: one at a time
 def list_item(unit_type, owner, fitting_id, data_dir=DATA_DIR, *, condition="Good", note="",
               request_id=None, now=None):
     """
@@ -126,7 +121,7 @@ def list_item(unit_type, owner, fitting_id, data_dir=DATA_DIR, *, condition="Goo
     if ((m.from_owner == owner) & (m.fitting_id == fitting_id)).any():
         raise ValueError(f"{owner} has already listed this fitting")
     stamp = _stamp(now)
-    listing = {"listing_id": _next_id(m.listing_id, "L"), "from_owner": owner, "unit_type": unit_type,
+    listing = {"listing_id": impact.next_id(m.listing_id, "L"), "from_owner": owner, "unit_type": unit_type,
                "fitting_id": fitting_id, "to_owner": "", "distance_km": "", "status": "unmatched",
                "condition": condition, "note": note, "posted_at": stamp, "matched_at": "", "collected_at": ""}
     wanted = req[(req.unit_type == unit_type) & (req.fitting_id == fitting_id)
@@ -146,6 +141,7 @@ def list_item(unit_type, owner, fitting_id, data_dir=DATA_DIR, *, condition="Goo
     return _describe(listing, data)
 
 
+@impact.locked
 def request_item(unit_type, requester, fitting_id, data_dir=DATA_DIR, *, note="", now=None):
     """
     A neighbour asks for a fitting. Matched at once to the nearest waiting listing,
@@ -158,7 +154,7 @@ def request_item(unit_type, requester, fitting_id, data_dir=DATA_DIR, *, note=""
     if ((req.requester == requester) & (req.fitting_id == fitting_id) & (req.status == "open")).any():
         raise ValueError(f"{requester} is already asking for this fitting")
     stamp = _stamp(now)
-    request = {"request_id": _next_id(req.request_id, "R"), "requester": requester, "unit_type": unit_type,
+    request = {"request_id": impact.next_id(req.request_id, "R"), "requester": requester, "unit_type": unit_type,
                "fitting_id": fitting_id, "status": "open", "listing_id": "", "note": note, "posted_at": stamp}
     waiting = m[(m.unit_type == unit_type) & (m.fitting_id == fitting_id)
                 & (m.status == "unmatched") & (m.from_owner != requester)]
@@ -182,6 +178,7 @@ def _match(m, listing_id, requester, stamp, data_dir, data):
     return _describe(m[m.listing_id == listing_id].iloc[0].to_dict(), data)
 
 
+@impact.locked
 def claim(listing_id, requester, data_dir=DATA_DIR, *, now=None):
     """
     "I'd like this": a neighbour takes one waiting offer. Saved as a request that is
@@ -200,7 +197,7 @@ def claim(listing_id, requester, data_dir=DATA_DIR, *, now=None):
         raise ValueError(f"Listing {listing_id} is already {row.status}: it's going to another neighbour")
     stamp = _stamp(now)
     listing = _match(m, listing_id, requester, stamp, data_dir, data)
-    request = {"request_id": _next_id(req.request_id, "R"), "requester": requester, "unit_type": row.unit_type,
+    request = {"request_id": impact.next_id(req.request_id, "R"), "requester": requester, "unit_type": row.unit_type,
                "fitting_id": row.fitting_id, "status": "matched", "listing_id": listing_id, "note": "",
                "posted_at": stamp}
     _save(pd.concat([req, pd.DataFrame([request])], ignore_index=True), "requests.csv", data_dir)
@@ -216,6 +213,7 @@ def _post_unit(data, post_id):
     raise ValueError(f"No post {post_id}")
 
 
+@impact.locked
 def comment(post_id, author, text, data_dir=DATA_DIR, *, now=None):
     """A message under an offer or a request, from anyone in that home type. Returns the message."""
     data = impact.load_data(data_dir)
@@ -225,6 +223,7 @@ def comment(post_id, author, text, data_dir=DATA_DIR, *, now=None):
     return _add_message(data, data_dir, post_id, author, "comment", _text(text, "message", required=True), now)
 
 
+@impact.locked
 def collect(listing_id, data_dir=DATA_DIR, *, by=None, thanks="", now=None):
     """
     The neighbour picked the fitting up: the listing is collected and its carbon counts.
