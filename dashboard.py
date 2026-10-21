@@ -6,11 +6,12 @@ app.py plugs it into the main app with:
     from dashboard import dashboard_bp
     app.register_blueprint(dashboard_bp)
 
-Pages (all take ?unit=T2S or ?unit=C3R):
+Pages (all take ?unit=T2S or ?unit=C3R; without it, the signed-in neighbour's home type):
+    /signin             demo sign-in: SDP staff, a homeowner or a buyer moving in (no password)
+    /dashboard          the SDP dashboard, the main page
     /advisor            buyer Fit-Out Advisor: keep / opt out / upgrade
-    /dashboard          the SDP dashboard
     /match              Neighbour Match community: feed, give, ask, chat, collect, map
-                        (&as=T2S-O001 picks which simulated neighbour you are)
+                        (as the signed-in neighbour; &as=T2S-O001 shows it as someone else)
     /simulate           What-if launch projection
     /tagger             AI tagging of messy renovation notes
 API (JSON; bad input -> 400 with an "error"):
@@ -28,15 +29,18 @@ API (JSON; bad input -> 400 with an "error"):
     POST /api/match/collect  {"listing_id", "by"?, "thanks"?}    marks it picked up
     POST /api/reset-demo     {} (JSON)  puts every data file back to the starting demo data
     GET  /export/<ripout-index|impact-by-fitting|upgrade-mix|choices>.csv?unit=T2S
+    POST /signin  (form: who, next?)   POST /signout
 Every POST must come from the app's own pages (another site's Origin -> 403),
 and a request body is at most MAX_REQUEST_BYTES (bigger -> 413).
 """
 
 import io
 import math
+import os
 from urllib.parse import urlparse
 
-from flask import Blueprint, Response, abort, jsonify, make_response, render_template, request
+from flask import (Blueprint, Response, abort, jsonify, make_response, redirect, render_template, request,
+                   session, url_for)
 import plotly.graph_objects as go
 
 import generate_dummy_data
@@ -73,6 +77,34 @@ ADVICE_COLOUR = {"stop": "#d03b3b", "offer": "#b98000", "keep": "#3f8f4a"}
 def advice_css():
     """`advice_css` for every template: style="{{ advice_css }}" on <body>."""
     return {"advice_css": " ".join(f"--advice-{k}: {c};" for k, c in ADVICE_COLOUR.items())}
+
+
+# ---- Demo sign-in ------------------------------------------------------------
+# No passwords: everyone in the demo is simulated. Who is signed in is kept in
+# Flask's signed session cookie, and signed_in() is the one place the app asks.
+# The real login (with the database) replaces signed_in() and the two /signin
+# routes, returning the logged-in user's id the same way.
+SDP_STAFF = "sdp"
+SDP_PERSON = {"id": SDP_STAFF, "name": "SDP staff", "initials": "SD", "colour": "#1f4a37", "role": "Sime Darby Property"}
+
+
+def signed_in():
+    """Who is signed in: SDP_STAFF, a neighbour id (T2S-O001, C3R-B005), or None."""
+    who = session.get("who")
+    return who if isinstance(who, str) else None
+
+
+def _home_type(who):
+    """The home type in a neighbour's id (T2S-O001 -> T2S), or None."""
+    unit = who.split("-")[0] if isinstance(who, str) else ""
+    return unit if unit in UNIT_TYPES else None
+
+
+@dashboard_bp.app_context_processor
+def signed_in_person():
+    """`signed_in` for every page's top bar: None, SDP_PERSON, or the neighbour (community.person)."""
+    who = signed_in()
+    return {"signed_in": SDP_PERSON if who == SDP_STAFF else (community.person(who) if who else None)}
 
 
 def advice_key(advice):
@@ -115,10 +147,16 @@ MAX_REQUEST_BYTES = 64 * 1024   # the biggest real body (a buyer's choices) is w
 
 
 @dashboard_bp.record_once
-def _limit_request_size(state):
-    """Any app using this blueprint refuses bodies over MAX_REQUEST_BYTES before reading them."""
+def _app_settings(state):
+    """
+    Any app using this blueprint refuses bodies over MAX_REQUEST_BYTES before reading
+    them, and gets a key to sign the session cookie (who is signed in) if it has none.
+    A random key signs everyone out when the app restarts, which is fine for a demo.
+    """
     if state.app.config.get("MAX_CONTENT_LENGTH") is None:
         state.app.config["MAX_CONTENT_LENGTH"] = MAX_REQUEST_BYTES
+    if not state.app.secret_key:
+        state.app.secret_key = os.environ.get("RFH_SECRET_KEY") or os.urandom(32)
 
 
 @dashboard_bp.app_errorhandler(413)
@@ -149,7 +187,8 @@ def _known_unit(unit):
 
 
 def _unit():
-    unit = request.args.get("unit", "T2S")
+    """?unit=, else the signed-in neighbour's home type, else T2S. Unknown -> 404 (400 for the API)."""
+    unit = request.args.get("unit") or _home_type(signed_in()) or "T2S"
     if unit not in UNIT_TYPES:
         if request.path.startswith("/api/"):
             # API callers get a JSON 400 they can show, like every other API error.
@@ -370,8 +409,10 @@ def match():
     data = _data()
     hints = neighbour_match.suggestions(data, unit)
     members = neighbour_match.people(data, unit)
-    you = request.args.get("as", "")
-    if you not in members:   # default: an owner with something a neighbour is asking for
+    you = request.args.get("as", "")   # a link or a reload after an action can show it as someone
+    if you not in members:
+        you = signed_in()               # else the neighbour signed in, if they live in this home type
+    if you not in members:              # else a sample neighbour: an owner with something someone wants
         you = hints["can_list"][0][0] if hints["can_list"] else min(members)
     items = match_map.listings(data, unit)
     asks = match_map.asks(data, unit)
@@ -402,7 +443,63 @@ def match():
         names={n["id"]: n["name"] for n in neighbours},
         wanted_fittings=dict(zip(req.request_id[req.unit_type == unit], req.fitting_id[req.unit_type == unit])),
         conditions=neighbour_match.CONDITIONS, max_text=neighbour_match.MAX_TEXT,
-        trip_factor=impact.TRANSPORT_KGCO2E_PER_KM)
+        trip_factor=impact.TRANSPORT_KGCO2E_PER_KM, you_signed_in=signed_in() == you)
+
+
+@dashboard_bp.route("/signin")
+def signin():
+    """Demo sign-in: SDP staff, a homeowner or a buyer moving in. Suggests one of each per home type."""
+    unit = _unit()
+    data = _data()
+    names = data["fittings"].set_index(["unit_type", "fitting_id"]).name
+    req = data["requests"]
+    picks = {"Homeowner": [], "Moving in": []}
+    for u in UNIT_TYPES:
+        hints = neighbour_match.suggestions(data, u)
+        if hints["can_list"]:          # an owner with something to give, someone asking for it if possible
+            owner, fid = hints["can_list"][0]
+            asked = " · a neighbour wants one" if fid in hints["open_asks"] else ""
+            picks["Homeowner"].append({**community.person(owner), "hint": f"Can give: {names[u, fid].lower()}{asked}"})
+        looking = req[(req.unit_type == u) & (req.status == "open") & req.requester.str.contains("-B")]
+        buyer = looking.requester.iloc[-1] if not looking.empty else min(hints["buyers"])
+        hint = (f"Choosing a fit-out · looking for: {names[u, looking.fitting_id.iloc[-1]].lower()}"
+                if not looking.empty else "Choosing a fit-out before handover")
+        picks["Moving in"].append({**community.person(buyer), "hint": hint})
+    everyone = {u: community.everyone(data, u) for u in UNIT_TYPES}
+    return render_template("signin.html", unit=unit, unit_types=UNIT_TYPES, picks=picks, everyone=everyone,
+                           sdp=SDP_STAFF)
+
+
+def _safe_next(target):
+    """Only a page of this app ("/match?unit=T2S"), never another site ("//evil.example", "https://...")."""
+    return isinstance(target, str) and target.startswith("/") and not target.startswith("//") and "\\" not in target
+
+
+@dashboard_bp.route("/signin", methods=["POST"])
+def signin_post():
+    """
+    Form: who (SDP_STAFF or a neighbour id), next (optional page to go to).
+    Without next: SDP staff go to the dashboard, homeowners to Neighbour Match,
+    buyers moving in to the Advisor, each in their home type.
+    """
+    who = request.form.get("who", "")
+    unit = _home_type(who)
+    if who != SDP_STAFF and (unit is None or who not in neighbour_match.people(_data(), unit)):
+        abort(400, "Pick someone from the list to sign in as")
+    session["who"] = who
+    target = request.form.get("next", "")
+    if not _safe_next(target):
+        if who == SDP_STAFF:
+            target = url_for(".dashboard")
+        else:
+            target = url_for(".match" if community.person(who)["role"] == "Homeowner" else ".advisor", unit=unit)
+    return redirect(target)
+
+
+@dashboard_bp.route("/signout", methods=["POST"])
+def signout():
+    session.pop("who", None)
+    return redirect(url_for(".signin"))
 
 
 def _match_call(step):
