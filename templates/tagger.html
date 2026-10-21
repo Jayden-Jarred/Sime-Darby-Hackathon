@@ -228,11 +228,13 @@
       });
       const body = await res.json();
       if (!res.ok) throw new Error(body.error || 'Could not list it');
-      const l = body.listing;   // opens Neighbour Match as this owner, on the new post
-      const link = `/match?unit=${encodeURIComponent(UNIT)}&as=${encodeURIComponent(l.from_owner)}&focus=${encodeURIComponent(l.listing_id)}`;
+      const l = body.listing;   // "See your post" signs in as this owner (demo sign-in) and opens the post
+      const next = `/match?unit=${encodeURIComponent(UNIT)}&focus=${encodeURIComponent(l.listing_id)}`;
       btn.outerHTML = `<span class="offer-done">${l.status === 'matched'
         ? `Matched with a neighbour ${l.distance_km.toFixed(1)} km away.`
-        : 'Posted. Waiting for a neighbour who needs one.'} <a href="${link}">See the post →</a></span>`;
+        : 'Posted. Waiting for a neighbour who needs one.'}
+        <form method="post" action="/signin" class="inline-form"><input type="hidden" name="who" value="${esc(l.from_owner)}">`
+        + `<input type="hidden" name="next" value="${esc(next)}"><button type="submit" class="link-button">See your post →</button></form></span>`;
     } catch (err) {
       btn.disabled = false;
       showError(err.message);
