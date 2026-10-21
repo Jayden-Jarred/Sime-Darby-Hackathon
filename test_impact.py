@@ -477,6 +477,73 @@ for unit, name in (("T2S", "Ground-floor tiles"), ("C3R", "Living-room tiles")):
     tags = client.post("/api/tag", json={"unit": unit, "note": "hack all the floor tiles, retile"}).json["tags"]
     assert [t["name"] for t in tags if t["fitting_id"] == "TIL-FLR"] == [name], (unit, tags)
 
+# saving under a person (on a copy of the data): a buyer who confirms again, an owner who reports again
+tmp = Path(tempfile.mkdtemp()); shutil.copytree(impact.DATA_DIR, tmp / "data"); D = tmp / "data"
+c0 = impact.load_data(D)["choices"]
+buyer = "T2S-B025"
+assert impact.save_buyer_choices("T2S", {"KIT-CAB": "opt_out", "TIL-FLR": "upgrade"}, D, buyer_id=buyer) == buyer
+c1 = impact.load_data(D)["choices"]
+mine = c1[c1.buyer_id == buyer].set_index("fitting_id")
+assert c1.buyer_id.nunique() == c0.buyer_id.nunique() and len(mine) == len(c0[c0.buyer_id == buyer])
+assert mine.choice["KIT-CAB"] == "opt_out" and mine.choice["TIL-FLR"] == "upgrade" and mine.choice["KIT-TOP"] == "keep"
+others = lambda c: c[c.buyer_id != buyer].sort_values(["buyer_id", "fitting_id"]).reset_index(drop=True)
+assert others(c1).equals(others(c0))                                   # nobody else's choices changed
+r0 = impact.load_data(D)["ripouts"]
+owner = r0[(r0.unit_type == "T2S") & (r0.fitting_id == "KIT-CAB") & (r0.removed == 0)].owner_id.iloc[0]
+rate0 = impact.ripout_rates(impact.load_data(D), "T2S")[("T2S", "KIT-CAB")]
+assert impact.add_ripout_report("T2S", ["KIT-CAB"], "hak kabinet", D, owner_id=owner) == owner
+impact.add_ripout_report("T2S", ["KIT-CAB"], "hak kabinet lagi", D, owner_id=owner)   # the same report twice
+r1 = impact.load_data(D)["ripouts"]
+d1 = impact.load_data(D)
+owners = r0[r0.unit_type == "T2S"].owner_id.nunique()
+assert r1.owner_id.nunique() == r0.owner_id.nunique()                 # still the same owners
+assert abs(impact.ripout_rates(d1, "T2S")[("T2S", "KIT-CAB")] - rate0 - 1 / owners) < 1e-9   # counted once
+row = r1[(r1.owner_id == owner) & (r1.fitting_id == "KIT-CAB")].iloc[0]
+assert row.removed == 1 and row.note == "hak kabinet lagi"
+keep = lambda r: r[~((r.owner_id == owner) & (r.fitting_id == "KIT-CAB"))].reset_index(drop=True)
+assert keep(r1).fillna("").equals(keep(r0).fillna(""))                # nothing else changed
+for refused in (lambda: impact.save_buyer_choices("T2S", {}, D, buyer_id="C3R-B001"),   # another home type
+                lambda: impact.save_buyer_choices("T2S", {}, D, buyer_id="T2S-O001"),   # not a buyer
+                lambda: impact.add_ripout_report("T2S", ["KIT-CAB"], "", D, owner_id="T2S-B001")):
+    try:
+        refused()
+        raise AssertionError("should be refused")
+    except ValueError:
+        pass
+shutil.rmtree(tmp)
+
+# the Advisor and AI tagging save under the person signed in (save functions stubbed: no real data is written)
+import community
+saved_for = {}
+real_save, real_report = impact.save_buyer_choices, impact.add_ripout_report
+impact.save_buyer_choices = lambda unit, picks, upgrade_picks=None, buyer_id=None: saved_for.update(buyer=buyer_id) or buyer_id or "T2S-B999"
+impact.add_ripout_report = lambda unit, fids, note, owner_id=None: saved_for.update(owner=owner_id) or owner_id or "T2S-O999"
+try:
+    web = real_app.test_client()
+    for who, unit, expect_buyer, expect_owner in (("T2S-B025", "T2S", "T2S-B025", None), ("T2S-B025", "C3R", None, None),
+                                                  ("T2S-O001", "T2S", None, "T2S-O001"), ("sdp", "T2S", None, None)):
+        web.post("/signin", data={"who": who})
+        res = web.post("/api/choices", json={"unit": unit, "choices": {}})
+        assert saved_for["buyer"] == expect_buyer and res.json["name"] == (community.person(who)["name"] if expect_buyer else None), (who, unit)
+        res = web.post("/api/report", json={"unit": unit, "note": "x", "fittings": ["KIT-CAB"]})
+        assert saved_for["owner"] == expect_owner, (who, unit, saved_for)
+    web.post("/signout")
+    web.post("/api/choices", json={"unit": "T2S", "choices": {}})
+    assert saved_for["buyer"] is None                                    # not signed in: a new buyer
+finally:
+    impact.save_buyer_choices, impact.add_ripout_report = real_save, real_report
+c = data["choices"]                                                      # a signed-in buyer's choices are filled in
+fid = c[(c.buyer_id == "T2S-B025") & (c.choice != "keep")]
+web.post("/signin", data={"who": "T2S-B025"})
+page = web.get("/advisor?unit=T2S").data.decode()
+assert "Saving for <b>" + community.person("T2S-B025")["name"] in page
+for f, ch in zip(fid.fitting_id, fid.choice):
+    assert f'name="c-{f}" value="{ch}" checked' in page, (f, ch)
+web.post("/signin", data={"who": "T2S-O001"})
+assert f"Adds to <b>{community.person('T2S-O001')['name']}</b>" in web.get("/tagger?unit=T2S").data.decode()
+web.post("/signout")
+assert "Saves as a new buyer" in web.get("/advisor?unit=T2S").data.decode()
+
 t = impact.dashboard_totals(data, "T2S")
 print("All checks passed.")
 print({k: (round(v) if isinstance(v, float) else v) for k, v in t.items() if k != "reuse"})
