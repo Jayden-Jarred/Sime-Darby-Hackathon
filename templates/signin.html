@@ -1,0 +1,98 @@
+{#- Demo sign-in  ·  /signin  ·  rendered by dashboard.signin()
+    Pick who you are for the demo: SDP staff (-> the SDP dashboard), a homeowner
+    (-> Neighbour Match) or a buyer moving in (-> the Advisor). No password: the
+    people are simulated. Each choice posts to /signin (dashboard.signin_post),
+    which remembers it in the session; the top bar of every page shows it.
+    One suggested person per home type, or pick anyone from the lists. -#}
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Right-Fit Homes · Demo sign-in</title>
+  <link rel="preload" href="{{ url_for('static', filename='fonts/fraunces.woff2') }}" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="{{ url_for('static', filename='fonts/figtree.woff2') }}" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
+</head>
+<body style="{{ advice_css }}">
+{% macro avatar(p) -%}
+  <span class="avatar" style="background: {{ p.colour }}" aria-hidden="true">{{ p.initials }}</span>
+{%- endmacro %}
+<div class="wrap">
+  {% set page = 'signin' %}{% include '_topbar.html' %}
+
+  <header class="page-head">
+    <div>
+      <p class="kicker">Demo sign-in</p>
+      <h1 class="headline">Who's using <em>Right-Fit Homes?</em></h1>
+      <p class="standfirst">Pick who you are for this demo. There's <b>no password</b>: everyone here is simulated.
+        In the real app, owners and buyers would sign in with their SDP account.</p>
+      <span class="sim-badge" title="Simulated people, names and addresses."><i aria-hidden="true">!</i>Demo only · simulated people</span>
+    </div>
+    {% if signed_in %}
+      <form method="post" action="{{ url_for('dashboard.signout') }}" class="signed-now">
+        <p>Signed in as <b>{{ signed_in.name }}</b></p>
+        <button type="submit" class="dl">Sign out</button>
+      </form>
+    {% endif %}
+  </header>
+
+  <div class="role-grid">
+    <section class="panel role-card sdp" aria-labelledby="role-sdp">
+      <svg class="role-icon" viewBox="0 0 48 48" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M6 42h36M11 36V22M20 36V12M29 36V26M38 36V17"/></g></svg>
+      <h2 id="role-sdp">SDP staff</h2>
+      <p>The main dashboard: which fittings owners rip out, what to stop installing at the next launch,
+        and the carbon and money saved.</p>
+      <form method="post" action="{{ url_for('dashboard.signin_post') }}">
+        <input type="hidden" name="who" value="{{ sdp }}">
+        <button type="submit" class="btn-primary small">Sign in as SDP staff</button>
+      </form>
+    </section>
+
+    {% for role, title, blurb, goes in (
+         ('Homeowner', 'Homeowner', 'Report what you removed after handover, and give it to a neighbour with the same home.', 'Opens Neighbour Match'),
+         ('Moving in', 'Moving in', 'Choose your fit-out before handover, and ask neighbours for fittings you need.', 'Opens the Buyer advisor')) %}
+      <section class="panel role-card" aria-labelledby="role-{{ loop.index }}">
+        <svg class="role-icon" viewBox="0 0 48 48" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+          {% if role == 'Homeowner' %}<path d="M7 22 24 8l17 14v19H7zM19 41V29h10v12"/>
+          {% else %}<circle cx="16" cy="24" r="8"/><path d="M24 24h18M36 24v6M41 24v4"/>{% endif %}</g></svg>
+        <h2 id="role-{{ loop.index }}">{{ title }}</h2>
+        <p>{{ blurb }} <span class="goes">{{ goes }}.</span></p>
+        <p class="pick-label">Suggested for the demo</p>
+        <ul class="people-picks">
+          {% for p in picks[role] %}
+            <li><form method="post" action="{{ url_for('dashboard.signin_post') }}">
+              <input type="hidden" name="who" value="{{ p.id }}">
+              <button type="submit" class="person-pick">
+                {{ avatar(p) }}
+                <span><b>{{ p.name }}</b><small>{{ p.home }} · {{ unit_types[p.id.split('-')[0]] }}</small>
+                  <em>{{ p.hint }}</em></span>
+              </button>
+            </form></li>
+          {% endfor %}
+        </ul>
+        <form method="post" action="{{ url_for('dashboard.signin_post') }}" class="choose">
+          <label for="pick-{{ loop.index }}">Or anyone</label>
+          <div>
+            <select id="pick-{{ loop.index }}" name="who">
+              {% for u, label in unit_types.items() %}
+                <optgroup label="{{ label }}">
+                  {% for n in everyone[u] if n.role == role %}
+                    <option value="{{ n.id }}" {{ 'selected' if signed_in and n.id == signed_in.id }}>{{ n.name }} · {{ n.home }}</option>
+                  {% endfor %}
+                </optgroup>
+              {% endfor %}
+            </select>
+            <button type="submit" class="dl">Sign in</button>
+          </div>
+        </form>
+      </section>
+    {% endfor %}
+  </div>
+
+  <p class="fine-print signin-note">Every page also works without signing in. Signing in only decides whose view you
+    see: whose posts are "yours" on Neighbour Match, and which home type opens first.</p>
+</div>
+</body>
+</html>
