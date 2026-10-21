@@ -11,14 +11,15 @@ and waste).
 | --- | --- |
 | Buyer advisor | Keep, opt out for a credit, or pick an upgrade option, with live savings and a 3D model of the home that shows the chosen finish |
 | SDP dashboard | Rip-out index, "stop installing" advice for the next launch, carbon and RM saved, which upgrades buyers pick |
-| Neighbour Match | Fittings that still get removed, rehomed to the same house design nearby |
+| Neighbour Match | A community board for each home type: neighbours give away fittings they removed, ask for ones they need, chat, and say thanks. The nearest same-design home gets it |
 | What-if | Projects a whole launch: waste avoided, carbon, SDP's gain and payback |
 | AI tagging | Sorts messy renovation notes (English and Malay) into fittings, with an honest accuracy score |
 
 Built with Flask, pandas, Plotly and three.js, and runs offline.
 
-**All data is simulated.** The homes, owners, rip-out rates, buyer choices and
-Neighbour Match listings are made up. The fittings' weights, carbon factors and
+**All data is simulated.** The homes, owners, rip-out rates, buyer choices,
+Neighbour Match posts and messages, and the neighbours' names and addresses are
+made up. The fittings' weights, carbon factors and
 prices are realistic estimates from public sources: see
 [Where the numbers come from](#where-the-numbers-come-from). There is no survey
 data.
@@ -32,15 +33,18 @@ python test_impact.py             # checks the maths
 python app.py                     # open http://127.0.0.1:5000
 ```
 
-- `/advisor` — the buyer screen: keep / opt out / upgrade each fitting
-- `/dashboard` — the SDP dashboard
-- `/match` — Neighbour Match: animated map of removed fittings going to same-type homes nearby
-- `/simulate` — What-if: sliders to project a whole launch (carbon, RM, payback)
-- `/tagger` — AI tagging: type a messy note, see it sorted into fittings; add it as a report
+- `/advisor`: the buyer screen. Keep, opt out or upgrade each fitting, with the working behind every number
+- `/dashboard`: the SDP dashboard
+- `/match`: Neighbour Match community. Give away a removed fitting or ask for one, take an offer or answer a request, chat, mark it collected with a thank-you. `&as=T2S-B025` (or the "Switch neighbour" menu) picks which neighbour you are
+- `/simulate`: What-if. Sliders to project a whole launch (carbon, RM, payback)
+- `/tagger`: AI tagging. Type a messy note, see it sorted into fittings, add it as a report, then offer the removed fittings on Neighbour Match
 
-**Demo tip:** confirming choices on the Advisor saves them to
-`data/choices.csv`, so the dashboard's buyer count and totals go up. Run
-`python generate_dummy_data.py` before the real demo to reset the data.
+**Demo tip:** confirming choices on the Advisor, adding reports on the AI
+tagging page and running matches all save to `data/`, so the dashboard's
+numbers go up. Before the real demo, press **Reset demo data** at the bottom
+of the dashboard (or run `python generate_dummy_data.py`). The data comes back
+exactly the same every time; only the Neighbour Match dates move, counting back
+from the hour you reset, so the feed looks recent.
 
 ## Files
 
@@ -61,7 +65,10 @@ file inside. On GitHub, the message next to each file says what it is.
 | `tagger.py` | Sorts messy notes into fittings (keyword version + honest accuracy test). Swap in an AI model by replacing `tag()` | Member 3 |
 | `templates/tagger.html` | AI tagging page | Member 3 |
 | `templates/simulate.html` | What-if simulator page (maths in `impact.simulate()`) | Member 4 |
-| `match_map.py`, `templates/match.html` | Neighbour Match map | Member 4 |
+| `neighbour_match.py` | Neighbour Match actions: offer, ask, instant nearest match, claim an offer, answer a request, message, collect with a thank-you | Member 3 |
+| `community.py` | The people side of Neighbour Match: names, the feed, your profile and badges, top neighbours, recent activity | Member 3 |
+| `match_map.py` | Gives each home a spot and an address on the fictional township map, and measures the distance between two homes | Member 4 |
+| `templates/match.html` | Neighbour Match community page: composer, feed, sidebar, map | Member 4 |
 | `static/app.css` | Shared styles and brand (forest green + terracotta) | — |
 | `templates/_topbar.html` | Logo and page switcher shared by every page | — |
 | `static/fonts/` | Fraunces (headlines) + Figtree (text), bundled for offline use, OFL licence | — |
@@ -118,9 +125,31 @@ measure how accurate the tagger is against this column.
 `upgrade_id` is the option from `upgrades.csv` for upgrades, empty otherwise.
 Data made before this column existed won't load: run `python generate_dummy_data.py`.
 
-### `data/matches.csv` — Neighbour Match listings
+### `data/matches.csv` — Neighbour Match offers ("listings")
 
-`listing_id, from_owner, unit_type, fitting_id, to_owner, distance_km, status (collected / matched / unmatched)`
+`listing_id, from_owner, unit_type, fitting_id, to_owner, distance_km, status, condition, note, posted_at, matched_at, collected_at`
+
+`status` goes `unmatched` (nobody has asked yet) → `matched` (a neighbour is
+picking it up; `to_owner` and `distance_km` filled in) → `collected`.
+`distance_km` is measured on the township map in `match_map.py`, so the
+number in the table and the line on the map always agree. `condition` is
+`Like new`, `Good` or `Fair`; `note` is what the owner wrote. Times are
+`YYYY-MM-DD HH:MM`, empty until that step happens.
+
+### `data/requests.csv` — Neighbour Match requests
+
+`request_id, requester, unit_type, fitting_id, status (open / matched), listing_id, note, posted_at`
+
+A neighbour asking for a fitting. `listing_id` is the listing it was matched
+to, empty while the request is `open`. "I'd like this" on an offer saves a
+request that is matched straight away, so every match has a request behind it.
+
+### `data/messages.csv` — the chat under each post
+
+`message_id, post_id, author, kind (comment / thanks), text, posted_at`
+
+`post_id` is a listing (`L…`) or a request (`R…`). `thanks` is the note the
+neighbour leaves when they mark an offer collected.
 
 ## For Member 2: getting live savings in the Advisor screen
 
@@ -141,14 +170,22 @@ It returns JSON:
 
 ```json
 {"unit_type": "T2S", "fitting_id": "KIT-CAB", "name": "Kitchen cabinets", "choice": "opt_out",
- "carbon_avoided_kg": 219.12, "material_avoided_kg": 330.0,
+ "carbon_avoided_kg": 219.12, "material_avoided_kg": 330.0, "carbon_counted": true,
  "sdp_saving_rm": 2470.0, "buyer_saving_rm": 6270.0, "buyer_credit_rm": 5770.0,
- "upgrade_revenue_rm": 0.0, "upgrade_id": null, "upgrade_name": null}
+ "ripout_skipped_rm": 500.0, "upgrade_revenue_rm": 0.0, "upgrade_id": null, "upgrade_name": null,
+ "working": ["Carbon: 330 kg × 0.664 kg CO₂e per kg = 219 kg CO₂e never made",
+             "You: RM5,770 credit + RM500 rip-out you skip = RM6,270",
+             "SDP: RM8,240 installation skipped − RM5,770 credit = RM2,470 saved"]}
 ```
 
 For an upgrade, add which option: `&choice=upgrade&upgrade=QUARTZ` (left out =
 the fitting's first option). `upgrade_revenue_rm` is that option's margin, and
 `upgrade_id` / `upgrade_name` say which one it was.
+
+`working` is the sum behind each number, in plain words; the Advisor shows it
+under each choice. `carbon_counted` is false when too few owners remove the
+fitting (see [How the numbers are calculated](#how-the-numbers-are-calculated)):
+the carbon and material are then 0, and the money still counts.
 
 An invalid choice (e.g. opting out of tiles), an unknown fitting or an
 unknown `unit` returns HTTP 400 with an `error` message, so the screen can
@@ -235,7 +272,15 @@ fill it (see `templates/dashboard.html`).
   standard item is never made, SDP earns `upgrade_margin`, and the buyer
   skips the rip-out cost.
 - **Carbon is only counted** for items the buyer would otherwise have removed.
-- **Reuse carbon** = item carbon − delivery trip (0.25 kg CO₂e per km for a small van, both ways — an assumption). One function, `impact.reuse_carbon_kg()`, used by the dashboard, the What-if and the Neighbour Match page.
+  We can't know that for one buyer, so the rule is per fitting: if at least
+  30% of owners remove it (`OFFER_THRESHOLD` in `impact.py`, the same line
+  as the "offer as opt-out" advice), opting out or upgrading counts its
+  carbon and material. Below 30%, the money still counts but the carbon
+  doesn't, and the Advisor says why. The What-if already counts only the
+  homes that would have ripped the item out, so it doesn't need this rule.
+- **Reuse carbon** = item carbon − delivery trip (0.25 kg CO₂e per km for a small van, both ways — an assumption). One function, `impact.reuse_carbon_kg()`, used by the dashboard, the What-if and the Neighbour Match page. It counts only once the neighbour has **collected** the item.
+- **Reuse rate** (dashboard KPI) = listings collected ÷ fittings listed on
+  Neighbour Match. Removals nobody listed don't count against it.
 - **Upgrade mix** (`impact.upgrade_mix()`, the "Which upgrades buyers pick"
   panel on the dashboard): for each fitting, how many buyers picked each
   upgrade option, its share of that fitting's upgrades, and the margin it
@@ -245,6 +290,53 @@ fill it (see `templates/dashboard.html`).
 - **Design advice:** removed by 50%+ → stop installing as standard;
   30–50% → offer as opt-out (offer as upgrade for `upgrade_only` items like
   tiles); below 30% → keep. Thresholds are in `impact.py`.
+
+## Neighbour Match
+
+Some owners will still remove a fitting. Neighbour Match rehomes it to a
+neighbour with the same house design, so it fits without changes.
+
+Some owners will still remove a fitting. Neighbour Match is a community board
+for each home type that rehomes it to a neighbour with the same house design,
+so it fits without changes. The page shows it as one neighbour sees it: pick
+who you are with "Switch neighbour" (the default is an owner with something a
+neighbour is looking for, so a demo "Give" matches at once).
+
+1. **Give.** An owner posts a fitting they removed, with its condition and a
+   note. They must have a rip-out report saying so (add one on the AI tagging
+   page, which then shows an "Offer the … to neighbours" button for each
+   fitting it can rehome).
+2. **Ask.** A neighbour posts what they need.
+3. **Match.** Whichever comes second completes the match straight away: same
+   home type, same fitting, the **nearest** home first (distance on the
+   township map). Until then an offer is "Available" and a request "Still
+   looking". A neighbour can also answer one post directly: **I'd like this**
+   on an offer, or **I have one** on a request (shown to owners who removed
+   that fitting).
+4. **Chat.** Anyone in the home type can write under a post, e.g. to arrange
+   the pickup.
+5. **Collect.** The giver or the neighbour taking it presses "Mark as
+   collected"; the neighbour can leave a thank-you note. Only then does its
+   carbon count on the dashboard.
+
+The sidebar shows your profile (given, taken in, carbon saved, badges: Giver,
+Super neighbour at 3 given, Second life when you take one in), the top
+neighbours by carbon saved, and recent activity. The feed filters to
+Available, Looking for, Rehomed or Mine, and searches names and notes. A
+request matched the moment it was made has no post of its own: its offer's
+post tells the story, with the request's note.
+
+Floor tiles, toilets and basins can't be listed: hacked-out tiles break, and
+sanitary ware isn't reused for hygiene reasons (`impact.NOT_REUSABLE`). Each
+owner can list a fitting once, and each neighbour can have one open request
+per fitting. Notes and messages are up to 280 characters. The actions are
+`neighbour_match.py`; names, the feed, badges and the leaderboard are
+`community.py`; homes, addresses and distances are `match_map.py`. The
+neighbours are simulated: names are made up from the id and addresses are on
+a fictional township ("No. 14, Jalan Harmoni 3", "Tower B, #12-03"). The
+generator makes six weeks of posts, chats, pick-ups and thank-yous by
+replaying random events through the same functions, so the demo data follows
+the same rules as the app.
 
 ## Where the numbers come from
 
@@ -281,12 +373,25 @@ python -c "import generate_dummy_data as g; g.write_fittings(); g.write_upgrades
 | `POST /api/tag` `{"note", "unit"}` | Tags one note: fittings found, confidence, words to highlight |
 | `POST /api/report` `{"unit", "note", "fittings": [...]}` | Saves a tagged note as a new rip-out report (updates the rip-out index) |
 | `GET /api/simulate?unit=T2S&homes=500&uptake=0.8&upgrade_share=0.4&credit_mult=1&match_rate=0.5&programme_cost=80000` | One launch projection |
+| `POST /api/match/list` `{"unit", "owner", "fitting", "condition"?, "note"?, "request_id"?}` | An owner offers a removed fitting. Returns `{"listing"}`: matched to the nearest open request (or to `request_id`, answering that post), or `unmatched` |
+| `POST /api/match/request` `{"unit", "requester", "fitting", "note"?}` | A neighbour asks for a fitting. Returns `{"request", "listing"}`; `listing` is null if nothing is waiting |
+| `POST /api/match/claim` `{"listing_id", "requester"}` | "I'd like this": takes one waiting offer. Returns `{"request", "listing"}` |
+| `POST /api/match/comment` `{"post_id", "author", "text"}` | A message under an offer or request. Returns `{"message"}` |
+| `POST /api/match/collect` `{"listing_id", "by"?, "thanks"?}` | Marks a matched listing as collected; `by` must be the giver or the neighbour taking it, and only that neighbour can add `thanks` |
+| `POST /api/reset-demo` | Rebuilds all the data in `data/` (the dashboard's Reset demo data button) |
 | `GET /export/<ripout-index or impact-by-fitting or upgrade-mix or choices>.csv?unit=T2S` | CSV downloads |
+
+The match routes return HTTP 400 with an `error` message when a rule is broken
+(tiles, an owner who never reported removing it, a fitting already listed, a
+listing that isn't matched yet, an empty or too-long message, someone from
+another home type, and so on).
 
 Check the tagger's accuracy any time with `python tagger.py`. The honest number is the
 **held-out** one: `HELD_OUT` notes the word lists were never tuned to. Notes the
 rules were adjusted to pass live in `TUNING_NOTES` and don't count. If you change
 the rules to fix a held-out miss, move that note to `TUNING_NOTES`.
 
-**Demo tip:** adding reports on the AI tagging page and confirming choices on the Advisor
-both change the data. Run `python generate_dummy_data.py` before the real demo.
+A note that says "wardrobe" without the room gives one tag per wardrobe, all
+with the same `pick_one` value. They're alternatives for **one** item, so the
+AI tagging page shows them as a pick-one choice and saves only the one picked
+(otherwise one wardrobe would count as two removals).
