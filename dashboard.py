@@ -345,6 +345,13 @@ def _unit_fitting_ids(data, unit):
     return set(data["fittings"][data["fittings"].unit_type == unit].fitting_id)
 
 
+def _unit_names(data, unit):
+    """fitting_id -> this home type's name for it, from fittings.csv (e.g. TIL-FLR -> "Ground-floor tiles").
+    The tagger keeps generic names; the pages show the data's, so every page names a fitting the same way."""
+    f = data["fittings"][data["fittings"].unit_type == unit]
+    return dict(zip(f.fitting_id, f.name))
+
+
 EXAMPLE_NOTES = [
     "hak semua kabinet dapur, tukar quartz top",
     "master bedroom wardrobe removed, built in new one",
@@ -364,14 +371,15 @@ def tagger_page():
     ev = tagger.evaluate(data["ripouts"])
     r = data["ripouts"]
     recent = r[(r.unit_type == unit) & r.note.notna() & (r.note != "")].tail(8)
+    names = _unit_names(data, unit)
     samples = []
     for note, truth in zip(recent.note, recent.fitting_id):
         t = tagger.tag(note, fitting_ids=_unit_fitting_ids(data, unit))["tags"]
         samples.append({"note": note, "truth": truth, "got": t[0]["fitting_id"] if t else None,
-                        "truth_name": tagger.NAMES.get(truth, truth)})
+                        "truth_name": names.get(truth, truth)})
     return render_template("tagger.html", unit=unit, unit_types=UNIT_TYPES, ev=ev,
                            samples=list(reversed(samples)), examples=EXAMPLE_NOTES,
-                           names=tagger.NAMES,
+                           names=names,
                            reusable=sorted(_unit_fitting_ids(data, unit) - impact.NOT_REUSABLE))
 
 
@@ -383,7 +391,12 @@ def api_tag():
     if not _known_unit(unit):
         return jsonify({"error": "Unknown unit"}), 400
     note = str(body.get("note") or "")[:500]
-    return jsonify(tagger.tag(note, unit, _unit_fitting_ids(_data(), unit)))
+    data = _data()
+    result = tagger.tag(note, unit, _unit_fitting_ids(data, unit))
+    names = _unit_names(data, unit)
+    for t in result["tags"]:   # this home type's names, as on every other page
+        t["name"] = names.get(t["fitting_id"], t["name"])
+    return jsonify(result)
 
 
 @dashboard_bp.route("/api/report", methods=["POST"])
@@ -613,9 +626,14 @@ def simulate():
     """What-if: project a whole launch with sliders."""
     unit = _unit()
     params = _sim_params()
+    data = _data()
+    # For the note on why tiles count here but not in the Advisor: real weight and rip-out rate.
+    tiles = impact.get_fitting(data["fittings"], unit, "TIL-FLR")
+    tiles["rate"] = impact.ripout_rates(data, unit).get((unit, "TIL-FLR"), 0.0)
     return render_template("simulate.html", unit=unit, unit_types=UNIT_TYPES, params=params,
                            sliders=SIM_SLIDERS, defaults=impact.SIM_DEFAULTS,
-                           result=impact.simulate(_data(), unit, **params),
+                           result=impact.simulate(data, unit, **params), tiles=tiles,
+                           threshold=round(impact.OFFER_THRESHOLD * 100),
                            transport=impact.TRANSPORT_KGCO2E_PER_KM, trip=impact.AVG_TRIP_KM)
 
 
