@@ -411,6 +411,32 @@ for url in ("/api/choices", "/api/tag", "/api/report", "/api/match/list", "/api/
 res = client.post("/api/match/comment", json={"post_id": "L001", "author": "x", "text": "x" * 100_000})
 assert res.status_code == 413 and res.json["error"], res.status_code
 
+# demo sign-in: "/" opens it, then the SDP dashboard is home; each role lands on its page
+from app import app as real_app
+web = real_app.test_client()
+assert web.get("/").headers["Location"].endswith("/signin")
+page = web.get("/signin").data.decode()
+assert "Sign in as SDP staff" in page and 'name="who"' in page
+res = web.post("/signin", data={"who": "sdp"})
+assert res.status_code == 302 and res.headers["Location"].endswith("/dashboard")
+assert web.get("/").headers["Location"].endswith("/dashboard")       # signed in: home is the SDP dashboard
+assert "SDP staff" in web.get("/dashboard?unit=T2S").data.decode()   # shown in the top bar
+owner = nm.suggestions(d2, "C3R")["can_list"][0][0]
+res = web.post("/signin", data={"who": owner})
+assert res.headers["Location"].endswith("/match?unit=C3R"), res.headers["Location"]   # homeowner -> Match
+page = web.get("/match").data.decode()                                 # no ?unit=: their home type
+assert "Signed in as" in page and f'value="{owner}" selected' in page and "3-room condominium" in page
+assert web.post("/signin", data={"who": "T2S-B003"}).headers["Location"].endswith("/advisor?unit=T2S")  # buyer
+for bad in ("nobody", "T2S-O999", "", "XYZ-O001"):                    # only real people (or SDP staff)
+    assert web.post("/signin", data={"who": bad}).status_code == 400, bad
+for target in ("https://evil.example", "//evil.example", "/\\evil.example"):   # never off to another site
+    res = web.post("/signin", data={"who": "sdp", "next": target})
+    assert res.headers["Location"].endswith("/dashboard"), (target, res.headers["Location"])
+assert web.post("/signin", data={"who": "sdp", "next": "/match?unit=T2S"}).headers["Location"].endswith("/match?unit=T2S")
+assert web.post("/signin", data={"who": "sdp"}, headers={"Origin": "https://evil.example"}).status_code == 403
+web.post("/signout")
+assert web.get("/").headers["Location"].endswith("/signin")
+
 t = impact.dashboard_totals(data, "T2S")
 print("All checks passed.")
 print({k: (round(v) if isinstance(v, float) else v) for k, v in t.items() if k != "reuse"})
