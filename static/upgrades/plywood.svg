@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 100">
+  <!-- Plywood cabinets: birch fronts, exposed ply edge on the end panel. Illustration, not a product photo. -->
+  <defs>
+    <pattern id="grain" width="16" height="32" patternUnits="userSpaceOnUse">
+      <path d="M4 0c2 8-2 16 0 32M10 0c-1 9 3 18 1 32M14 0c1 10-1 20 1 32" fill="none" stroke="#b48a52" stroke-opacity=".38" stroke-width=".7"/>
+    </pattern>
+    <pattern id="ply" width="4" height="2" patternUnits="userSpaceOnUse">
+      <rect width="4" height="1" fill="#f3dfb6"/><rect y="1" width="4" height="1" fill="#c39a60"/>
+    </pattern>
+  </defs>
+  <rect width="160" height="100" fill="#f2ece2"/>
+  <rect y="86" width="160" height="14" fill="#e2d9c9"/>
+  <rect x="12" y="36" width="136" height="13" fill="#e8e1d3"/>
+  <!-- wall units -->
+  <rect x="14" y="8" width="130" height="28" fill="#e6cda0"/>
+  <rect x="14" y="8" width="130" height="28" fill="url(#grain)"/>
+  <rect x="144" y="8" width="4" height="28" fill="url(#ply)"/>
+  <path d="M46.5 8v28M79 8v28M111.5 8v28" stroke="#a8814f" stroke-width=".9"/>
+  <rect x="14" y="35" width="134" height="1.2" fill="#c7a674"/>
+  <rect x="42.5" y="27" width="1.6" height="6" rx=".8" fill="#4a4038"/>
+  <rect x="49" y="27" width="1.6" height="6" rx=".8" fill="#4a4038"/>
+  <rect x="107.5" y="27" width="1.6" height="6" rx=".8" fill="#4a4038"/>
+  <rect x="114" y="27" width="1.6" height="6" rx=".8" fill="#4a4038"/>
+  <!-- worktop -->
+  <rect x="10" y="49" width="140" height="3.4" fill="#d9d4cb"/>
+  <rect x="10" y="52.4" width="140" height="1.2" fill="#c3bcb1"/>
+  <!-- base units -->
+  <rect x="14" y="53.6" width="130" height="30.4" fill="#e6cda0"/>
+  <rect x="14" y="53.6" width="130" height="30.4" fill="url(#grain)"/>
+  <rect x="144" y="53.6" width="4" height="30.4" fill="url(#ply)"/>
+  <path d="M46.5 53.6v30.4M79 53.6v30.4M111.5 53.6v30.4M14 63.8h32.5M14 73.9h32.5" stroke="#a8814f" stroke-width=".9"/>
+  <rect x="25" y="57" width="10" height="1.6" rx=".8" fill="#4a4038"/>
+  <rect x="25" y="67" width="10" height="1.6" rx=".8" fill="#4a4038"/>
+  <rect x="25" y="77" width="10" height="1.6" rx=".8" fill="#4a4038"/>
+  <rect x="75.5" y="57" width="1.6" height="6" rx=".8" fill="#4a4038"/>
+  <rect x="81" y="57" width="1.6" height="6" rx=".8" fill="#4a4038"/>
+  <rect x="114" y="57" width="1.6" height="6" rx=".8" fill="#4a4038"/>
+  <rect x="14" y="84" width="134" height="2" fill="#8f7655"/>
+</svg>
