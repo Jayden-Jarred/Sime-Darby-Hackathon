@@ -440,7 +440,7 @@ def match():
         you=community.you_card(data, unit, you), you_at=match_map.position(you, unit),
         posts=community.feed(data, unit, you), board=community.leaderboard(data, unit),
         activity=community.activity(data, unit), neighbours=neighbours,
-        names={n["id"]: n["name"] for n in neighbours},
+        names={n["id"]: n["name"] for n in neighbours}, homes={n["id"]: n["home"] for n in neighbours},
         wanted_fittings=dict(zip(req.request_id[req.unit_type == unit], req.fitting_id[req.unit_type == unit])),
         conditions=neighbour_match.CONDITIONS, max_text=neighbour_match.MAX_TEXT,
         trip_factor=impact.TRANSPORT_KGCO2E_PER_KM, you_signed_in=signed_in() == you)
