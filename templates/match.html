@@ -7,7 +7,9 @@
     request_id), messages (/api/match/comment) and "Mark as collected" with a
     thank-you (/api/match/collect), which counts its carbon. The sidebar is your
     profile, top neighbours and recent activity; the township map (positions from
-    match_map.py) is below. KPIs: impact.reuse_summary(). -#}
+    match_map.py, drawn in the script below: houses, streets, towers, park, traffic,
+    routes that draw in, vans, hover cards; still for reduced motion) is below.
+    KPIs: impact.reuse_summary(). -#}
 <!doctype html>
 <html lang="en">
 <head>
@@ -309,22 +311,25 @@
   <section class="section" aria-labelledby="map-title">
     <div class="section-head">
       <h2 id="map-title">Around the township</h2>
-      <p>Every offer's trip from the giver to the neighbour who takes it. Click a route or a home.
-        Positions are illustrative.</p>
+      <p>Every offer's trip from the giver to the neighbour who takes it. Point at a home to see who lives there;
+        tap or click a route to follow it. A fictional township: positions are illustrative.</p>
     </div>
     <div class="panel map-panel">
       <div class="panel-head">
         <ul class="wlegend">
-          <li><span class="sw route-done" aria-hidden="true"></span>Delivered</li>
-          <li><span class="sw route-on" aria-hidden="true"></span>Matched, on its way</li>
-          <li><span class="sw route-wait" aria-hidden="true"></span>Available</li>
-          <li><span class="sw route-ask" aria-hidden="true"></span>Neighbour looking</li>
+          <li><span class="sw route-done" aria-hidden="true"></span>Delivered <b>{{ summary.collected }}</b></li>
+          <li><span class="sw route-on" aria-hidden="true"></span>On its way <b>{{ summary.matched }}</b></li>
+          <li><span class="sw route-wait" aria-hidden="true"></span>Available <b>{{ summary.waiting }}</b></li>
+          <li><span class="sw route-ask" aria-hidden="true"></span>Neighbour looking <b>{{ summary.asking }}</b></li>
           <li><span class="sw route-you" aria-hidden="true"></span>You</li>
         </ul>
         <button type="button" class="dl" id="play" aria-pressed="false">▶ Play deliveries</button>
       </div>
-      <svg id="map" viewBox="0 0 1000 620" role="img"
-           aria-label="Map of a fictional township showing each offered fitting's route to its new home. The posts above have the same information."></svg>
+      <div class="map-wrap">
+        <svg id="map" viewBox="0 0 1000 620" role="img"
+             aria-label="Map of a fictional township showing each offered fitting's route to its new home. The posts above have the same information."></svg>
+        <div class="map-tip" id="map-tip" hidden></div>
+      </div>
       <div class="pick" id="pick" aria-live="polite">Pick a route or a home to follow its journey.</div>
     </div>
   </section>
@@ -350,6 +355,7 @@
   const UNIT = {{ unit | tojson }};
   const YOU = {{ you.person.id | tojson }};
   const NAMES = {{ names | tojson }};
+  const HOMES = {{ homes | tojson }};   // id -> address, for the map's hover cards
   const ITEMS = {{ items | tojson }};
   const ASKS = {{ asks | tojson }};
   const LAYOUT = {{ layout | tojson }};
@@ -486,7 +492,9 @@
   render();
 
   // ---- the township map ----
-  const NS = 'http://www.w3.org/2000/svg';
+  // Homes and routes sit where match_map.py puts them, so the map and the posts agree. The houses,
+  // streets, trees, park and traffic are scenery. Motion stops for viewers who prefer less of it.
+  const NS = 'http://www.w3.org/2000/svg', XLINK = 'http://www.w3.org/1999/xlink';
   const svg = document.getElementById('map');
   const el = (tag, attrs = {}, parent = svg) => {
     const n = document.createElementNS(NS, tag);
@@ -497,73 +505,242 @@
   const text = (x, y, s, attrs = {}, parent = svg) => { const t = el('text', { x, y, ...attrs }, parent); t.textContent = s; return t; };
   const STATUS = { collected: 'Delivered', matched: 'On its way', unmatched: 'Available' };
   const terraceOn = LAYOUT.active === 'terrace';
+  const SEGMENTS = [[74, 226], [246, 402], [422, 578], [598, 704]];   // terrace rows, split by the cross streets
+  const rand = (seed => () => (seed = (seed * 16807) % 2147483647) / 2147483647)(42);   // same scenery every load
 
-  el('rect', { x: 0, y: 0, width: 1000, height: 620, rx: 18, fill: '#f7f3ea' });
-  el('ellipse', { cx: 870, cy: 548, rx: 112, ry: 52, fill: '#d9e5d0' });
-  text(870, 553, 'Park', { class: 'map-label', 'text-anchor': 'middle' });
-  el('rect', { x: 722, y: 0, width: 22, height: 620, fill: '#e2d9c8' });
-  text(733, 610, 'Main road', { class: 'map-label small', 'text-anchor': 'middle' });
-  for (const [a, b] of LAYOUT.cross) el('rect', { x: a + 2, y: 60, width: b - a - 4, height: 520, fill: '#ece5d7' });
+  el('defs').innerHTML = `
+    <pattern id="grass" width="16" height="16" patternUnits="userSpaceOnUse">
+      <rect width="16" height="16" fill="#edf0e1"/>
+      <circle cx="4" cy="5" r="1" fill="#dfe6cf"/><circle cx="12" cy="12" r=".9" fill="#e3e9d5"/>
+    </pattern>
+    <pattern id="water" width="12" height="7" patternUnits="userSpaceOnUse">
+      <rect width="12" height="7" fill="#cde2e9"/>
+      <path d="M0 3.5q3-2.4 6 0t6 0" fill="none" stroke="#e8f2f5" stroke-width=".9"/>
+    </pattern>`;
+  el('rect', { x: 0, y: 0, width: 1000, height: 620, rx: 18, fill: 'url(#grass)' });
+  if (!terraceOn) el('rect', { x: 990, y: 0, width: 230, height: 620, fill: 'url(#grass)' });   // east side, seen when zoomed in on the condo
+  const ground = el('g'), terr = el('g', { class: terraceOn ? '' : 'faded-area' }),
+        condo = el('g', { class: terraceOn ? 'faded-area' : '' }), deco = el('g', { class: 'scenery' }),
+        traffic = el('g', { class: 'scenery' }), labels = el('g', { class: 'scenery' });   // labels above trees and cars
+
+  // streets: one in front of each terrace row, the cross streets, and the main road
+  const ROAD = '#e2dbcd', MARK = '#f8f5ee';
+  const roadYs = [LAYOUT.rows[0] - 22, ...LAYOUT.rows.map(y => y + 22)];
+  const roadTop = roadYs[0] - 4, roadBottom = roadYs[roadYs.length - 1] + 4;
+  for (const y of roadYs) el('rect', { x: 70, y: y - 4, width: 652, height: 8, fill: ROAD }, ground);
+  for (const [a, b] of LAYOUT.cross) {
+    el('rect', { x: a + 3, y: roadTop, width: b - a - 6, height: roadBottom - roadTop, fill: ROAD }, ground);
+    el('line', { x1: (a + b) / 2, y1: roadTop, x2: (a + b) / 2, y2: roadBottom, stroke: MARK, 'stroke-width': 1, 'stroke-dasharray': '6 6' }, ground);
+  }
+  el('rect', { x: 720, y: 0, width: 26, height: 620, fill: '#d6cfc0' }, ground);
+  el('line', { x1: 733, y1: 0, x2: 733, y2: 620, stroke: MARK, 'stroke-width': 1.6, 'stroke-dasharray': '12 9' }, ground);
+
+  // terrace houses: one roof per home, a back garden, and the ridge along each row
+  const ROOFS = ['#c97a55', '#bd6d49', '#d2865f', '#c3734e'];
+  LAYOUT.rows.forEach(y => {
+    for (const [x0, x1] of SEGMENTS) el('rect', { x: x0, y: y + 6, width: x1 - x0, height: 7, fill: '#dbe6cc' }, terr);
+  });
+  const PARKED = ['#f4efe4', '#4f6597', '#2f6b4f', '#8a8272', '#b4532f', '#3b3f3c'];
+  LAYOUT.slots.forEach(([x, y], i) => {
+    el('rect', { x: x - 4.5, y: y - 6, width: 9, height: 12,
+                 fill: ROOFS[(i * 7 + Math.floor(x / 9)) % ROOFS.length], stroke: 'rgba(110, 52, 28, .4)', 'stroke-width': .5 }, terr);
+    el('rect', { x: x - 3.5, y: y - 8.5, width: 7, height: 2.5, fill: '#efe5d2' }, terr);   // front porch
+    const r = rand();
+    if (r < .18) el('rect', { x: x - 2.6, y: y - 17, width: 5.2, height: 8, rx: 1.5,   // a car in the driveway
+                              fill: PARKED[Math.floor(rand() * PARKED.length)], stroke: 'rgba(0, 0, 0, .25)', 'stroke-width': .4 }, terr);
+    else if (r > .9) el('circle', { cx: x, cy: y + 10, r: 2.6, fill: '#8cb378' }, terr);   // a tree in the back garden
+  });
   LAYOUT.rows.forEach((y, i) => {
-    for (const [x0, x1] of [[74, 226], [246, 402], [422, 578], [598, 704]]) {
-      el('rect', { x: x0, y: y - 6, width: x1 - x0, height: 12, rx: 3, fill: terraceOn ? '#e3d7c3' : '#ece5d8' });
-    }
-    if (terraceOn) text(64, y + 4, String(i + 1), { class: 'map-label tiny', 'text-anchor': 'end' });   // street number
+    for (const [x0, x1] of SEGMENTS) el('line', { x1: x0, y1: y, x2: x1, y2: y, stroke: '#94502f', 'stroke-width': .8, opacity: .5 }, terr);
+    text(64, y + 4, String(i + 1), { class: 'map-label tiny', 'text-anchor': 'end' }, terr);   // street number
   });
-  text(76, 52, 'Terrace homes · Jalan Harmoni 1–11', { class: 'map-label' + (terraceOn ? '' : ' faded') });
-  LAYOUT.towers.forEach(([x, y], i) => {
-    el('rect', { x, y, width: 30, height: 30, rx: 4, fill: terraceOn ? '#ece5d8' : '#d6c9b2', stroke: terraceOn ? 'none' : '#a99c86' });
-    text(x + 15, y + 46, 'Tower ' + 'ABCDEF'[i], { class: 'map-label small' + (terraceOn ? ' faded' : ''), 'text-anchor': 'middle' });
-  });
-  text(785, 112, 'Condo towers', { class: 'map-label' + (terraceOn ? ' faded' : '') });
-  el('rect', { x: 76, y: 588, width: 200, height: 4, fill: '#8a8272' });   // scale bar: 200 units = 1 km
-  text(76, 610, '0', { class: 'map-label small' });
-  text(276, 610, '1 km', { class: 'map-label small', 'text-anchor': 'end' });
 
-  const routes = el('g'), marks = el('g'), overlay = el('g');
+  // the condo: a fenced compound with six towers and a pool
+  el('rect', { x: 766, y: 96, width: 170, height: 338, rx: 14, fill: '#e6eddb', stroke: '#c3cfb2', 'stroke-dasharray': '4 4' }, condo);
+  el('rect', { x: 834, y: 190, width: 32, height: 46, rx: 7, fill: 'url(#water)', stroke: '#b5d0d9' }, condo);
+  LAYOUT.towers.forEach(([x, y], i) => {
+    el('rect', { x: x + 5, y: y + 6, width: 30, height: 30, rx: 4, fill: 'rgba(48, 44, 32, .16)' }, condo);   // shadow
+    el('rect', { x, y, width: 30, height: 30, rx: 4, fill: '#e7ddcb', stroke: '#a99c86' }, condo);
+    el('rect', { x: x + 5, y: y + 5, width: 20, height: 20, rx: 2, fill: '#d4c6ab' }, condo);
+    el('rect', { x: x + 8, y: y + 8, width: 7, height: 5, rx: 1, fill: '#b9aa8f' }, condo);              // roof plant
+    text(x + 15, y + 46, 'Tower ' + 'ABCDEF'[i], { class: 'map-label small', 'text-anchor': 'middle' }, condo);
+  });
+
+  // community hall and park, with a pond and a path
+  el('rect', { x: 790, y: 448, width: 52, height: 26, rx: 3, fill: '#e2d3b8', stroke: '#b7a58a' }, deco);
+  el('path', { d: 'M790 461h52', stroke: '#c7b699', 'stroke-width': 1 }, deco);
+  text(816, 489, 'Community hall', { class: 'map-label small', 'text-anchor': 'middle' }, labels);
+  el('ellipse', { cx: 870, cy: 548, rx: 112, ry: 52, fill: '#cfe1bf', stroke: '#b8d0a5' }, deco);
+  el('path', { d: 'M766 560 Q850 492 976 552', fill: 'none', stroke: '#efe7d4', 'stroke-width': 4, 'stroke-linecap': 'round' }, deco);
+  el('ellipse', { cx: 906, cy: 566, rx: 26, ry: 12, fill: 'url(#water)', stroke: '#b5d0d9' }, deco);
+  text(842, 584, 'Park', { class: 'map-label', 'text-anchor': 'middle' }, labels);
+
+  function tree(x, y, r) {
+    el('circle', { cx: x + 1.6, cy: y + 2.2, r, fill: 'rgba(40, 62, 30, .14)' }, deco);
+    el('circle', { cx: x, cy: y, r, fill: '#8cb378' }, deco);
+    el('circle', { cx: x - r * .3, cy: y - r * .32, r: r * .48, fill: '#a6c892' }, deco);
+  }
+  for (let y = 18; y < 610; y += 22) {        // along both sides of the main road, clear of the side streets
+    if (!roadYs.some(r => Math.abs(r - y) < 9)) tree(711, y, 3.6);
+    if (y < 92 || y > 440) tree(756, y + 11, 4);
+  }
+  for (let x = 360; x < 700; x += 23) tree(x + rand() * 6, 40 + rand() * 8, 4 + rand() * 2);   // north green belt
+  for (let x = 330; x < 700; x += 25) tree(x + rand() * 6, 580 + rand() * 10, 4 + rand() * 2); // south green belt
+  for (const [x, y] of [[780, 110], [922, 110], [850, 146], [850, 268], [850, 392], [772, 426], [924, 426]]) tree(x, y, 5);
+  if (!terraceOn) for (let n = 0; n < 26; n++) tree(960 + rand() * 230, 90 + rand() * 400, 4 + rand() * 3);   // east of the condo
+  for (let n = 0; n < 60; n++) {   // park trees: inside the park, off the pond and the path
+    const x = 770 + rand() * 200, y = 502 + rand() * 92;
+    const inPark = ((x - 870) / 104) ** 2 + ((y - 548) / 46) ** 2 < 1;
+    const inPond = ((x - 906) / 36) ** 2 + ((y - 566) / 20) ** 2 < 1;
+    if (inPark && !inPond && Math.abs(y - (560 - (x - 766) * .1)) > 9) tree(x, y, 4.5 + rand() * 2.5);
+  }
+
+  // compass and scale bar (200 units = 1 km)
+  const compass = el('g', { transform: 'translate(966 46)' }, deco);
+  el('circle', { r: 14, fill: '#fffdf8', stroke: '#d8cfbd' }, compass);
+  el('path', { d: 'M0 -10 L4 1 L0 -1 L-4 1Z', fill: '#b4532f' }, compass);
+  el('path', { d: 'M0 10 L4 -1 L0 1 L-4 -1Z', fill: '#c9bfac' }, compass);
+  text(966, 25, 'N', { class: 'map-label small', 'text-anchor': 'middle' }, labels);
+  el('rect', { x: 76, y: 590, width: 200, height: 4, rx: 2, fill: '#8a8272' }, deco);
+  text(76, 610, '0', { class: 'map-label small' }, labels);
+  text(276, 610, '1 km', { class: 'map-label small', 'text-anchor': 'end' }, labels);
+  text(76, 54, 'Terrace homes · Jalan Harmoni 1–11', { class: 'map-label' + (terraceOn ? '' : ' faded') }, labels);
+  text(770, 86, 'Condo towers', { class: 'map-label' + (terraceOn ? ' faded' : '') }, labels);
+  text(733, 612, 'Main road', { class: 'map-label small', 'text-anchor': 'middle' }, labels);
+
+  // traffic on the main road (scenery)
+  const CARS = ['#2f6b4f', '#b4532f', '#4f6597', '#f4efe4', '#7a5c00', '#87496f'];
+  CARS.forEach((colour, i) => {
+    const down = i % 2 === 0, x = down ? 727 : 739;
+    const car = el('g', {}, traffic);
+    el('rect', { x: -3.2, y: -6.5, width: 6.4, height: 13, rx: 2, fill: colour, stroke: 'rgba(0, 0, 0, .28)', 'stroke-width': .6 }, car);
+    el('rect', { x: -2.3, y: down ? 1.6 : -4.8, width: 4.6, height: 3.2, rx: 1, fill: 'rgba(255, 255, 255, .6)' }, car);   // windscreen
+    if (reduced) { car.setAttribute('transform', `translate(${x} ${70 + i * 95})`); return; }
+    el('animateMotion', { dur: `${10 + i * 1.6}s`, begin: `${-i * 2.7}s`, repeatCount: 'indefinite',
+                          path: down ? `M${x} -20 L${x} 640` : `M${x} 640 L${x} -20` }, car);
+  });
+
+  // ---- routes, homes and motion ----
+  const routes = el('g'), marks = el('g'), vans = el('g', { class: 'scenery' }), overlay = el('g', { class: 'scenery picked' });
   function curve(a, b) {
     const mx = (a[0] + b[0]) / 2, my = (a[1] + b[1]) / 2;
     const dx = b[0] - a[0], dy = b[1] - a[1], len = Math.hypot(dx, dy) || 1;
     const bend = Math.min(60, len * 0.2) + 8;
     return `M${a[0]} ${a[1]} Q${mx - (dy / len) * bend} ${my + (dx / len) * bend} ${b[0]} ${b[1]}`;
   }
-  const byId = {};
+  function van(id, parent, { loop = false, dur = 1.4 } = {}) {   // a small van driving along route `id`
+    const g = el('g', { class: 'van' }, parent);
+    el('rect', { x: -7, y: -4, width: 14, height: 8, rx: 2 }, g);
+    el('rect', { x: 3, y: -4, width: 4, height: 8, rx: 1.5, class: 'cab' }, g);
+    const anim = el('animateMotion', { dur: `${dur}s`, rotate: 'auto', fill: 'freeze',
+                                       repeatCount: loop ? 'indefinite' : '1', begin: loop ? `${-rand() * dur}s` : 'indefinite' }, g);
+    const mp = el('mpath', {}, anim);
+    mp.setAttribute('href', '#p-' + id);
+    mp.setAttributeNS(XLINK, 'xlink:href', '#p-' + id);
+    return anim;
+  }
+  function pulse(x, y, kind) {
+    const c = el('circle', { cx: x, cy: y, r: 5, class: 'pulse ' + kind }, marks);
+    c.style.animationDelay = `${(rand() * 2.4).toFixed(2)}s`;
+  }
+  const byId = {}, askById = {};
+  let drawn = 0;
   for (const it of ITEMS) {
     byId[it.id] = it;
     if (it.to) {
-      el('path', { id: 'p-' + it.id, d: curve(it.from, it.to), class: 'route ' + it.status }, routes);
-      const hit = el('path', { d: curve(it.from, it.to), class: 'route-hit', 'data-id': it.id }, routes);
-      hit.appendChild(document.createElementNS(NS, 'title')).textContent = `${it.name}: ${who(it.from_owner)} to ${who(it.to_owner)}, ${km(it.km)}`;
-      el('circle', { cx: it.to[0], cy: it.to[1], r: 5, class: 'home-to ' + it.status }, marks);
+      const p = el('path', { id: 'p-' + it.id, d: curve(it.from, it.to), class: 'route ' + it.status }, routes);
+      if (!reduced && it.status === 'collected') {   // delivered routes draw themselves in when the map comes into view
+        p.style.setProperty('--len', p.getTotalLength().toFixed(1));
+        p.style.setProperty('--delay', `${drawn++ * 90}ms`);
+        p.classList.add('draw');
+      }
+      el('path', { d: curve(it.from, it.to), class: 'route-hit', 'data-id': it.id }, routes);
+      el('circle', { cx: it.to[0], cy: it.to[1], r: 5, class: 'home-to ' + it.status, 'data-id': it.id }, marks);
+      if (it.status === 'matched' && !reduced) van(it.id, vans, { loop: true, dur: Math.max(2.6, p.getTotalLength() / 55) });
+    } else if (!reduced) {
+      pulse(it.from[0], it.from[1], 'wait');   // available: waiting for a neighbour
     }
-    const from = el('circle', { cx: it.from[0], cy: it.from[1], r: 5, class: 'home-from ' + it.status, 'data-id': it.id }, marks);
-    from.appendChild(document.createElementNS(NS, 'title')).textContent = `${who(it.from_owner)}: ${it.name}, ${STATUS[it.status]}`;
+    el('circle', { cx: it.from[0], cy: it.from[1], r: 5, class: 'home-from ' + it.status, 'data-id': it.id }, marks);
   }
   for (const a of ASKS) {   // neighbours looking for a fitting nobody has offered yet
-    const m = el('rect', { x: a.at[0] - 5, y: a.at[1] - 5, width: 10, height: 10, rx: 2, class: 'home-ask', 'data-ask': a.id }, marks);
-    m.appendChild(document.createElementNS(NS, 'title')).textContent = `${who(a.requester)} is looking for: ${a.name}`;
+    askById[a.id] = a;
+    if (!reduced) pulse(a.at[0], a.at[1], 'ask');
+    el('rect', { x: a.at[0] - 5, y: a.at[1] - 5, width: 10, height: 10, rx: 2, class: 'home-ask', 'data-ask': a.id }, marks);
   }
   const me = el('g', { class: 'home-you' }, marks);   // where you live
-  el('circle', { cx: YOU_AT[0], cy: YOU_AT[1], r: 9 }, me);
+  if (!reduced) pulse(YOU_AT[0], YOU_AT[1], 'you');
+  el('circle', { cx: YOU_AT[0], cy: YOU_AT[1], r: 9, 'data-you': 1 }, me);
   text(YOU_AT[0], YOU_AT[1] - 14, 'You', { class: 'map-label small you-label', 'text-anchor': 'middle' }, me);
 
+  // Condo homes are all in the six towers, so the condo map zooms in on the compound (same positions and distances).
+  const CONDO_VIEW = [505, 70, 693, 430], FULL_VIEW = [0, 0, 1000, 620];   // same shape as the full map
+  const setView = v => svg.setAttribute('viewBox', v.map(n => n.toFixed(1)).join(' '));
+  function zoomToCondo() {
+    if (reduced) return setView(CONDO_VIEW);
+    const t0 = performance.now();
+    const step = now => {
+      const k = Math.min(1, (now - t0) / 1400), ease = 1 - (1 - k) ** 3;
+      setView(FULL_VIEW.map((f, i) => f + (CONDO_VIEW[i] - f) * ease));
+      if (k < 1) requestAnimationFrame(step);
+    };
+    requestAnimationFrame(step);
+  }
+  function onSeen() {   // once the map is on screen: draw the delivered routes in, and zoom to the condo
+    svg.classList.add('in-view');
+    if (!terraceOn) zoomToCondo();
+  }
+  const io = 'IntersectionObserver' in window
+    && new IntersectionObserver(es => { if (es.some(e => e.isIntersecting)) { io.disconnect(); onSeen(); } }, { threshold: 0.2 });
+  io ? io.observe(svg) : onSeen();
+
+  // ---- hover cards ----
+  const tip = document.getElementById('map-tip'), wrap = svg.parentNode;
+  function tipFor(t) {
+    const it = byId[t.getAttribute('data-id')], ask = askById[t.getAttribute('data-ask')];
+    if (it) return [it.name, STATUS[it.status] + (it.status === 'collected' ? ` · ${Math.round(it.carbon_saved_kg)} kg CO₂e saved` : ''),
+                    `From ${who(it.from_owner)}, ${HOMES[it.from_owner] || ''}`,
+                    it.to ? `To ${who(it.to_owner)}, ${HOMES[it.to_owner] || ''} · ${km(it.km)}` : 'Waiting for a neighbour who needs one'];
+    if (ask) return [`Looking for: ${ask.name}`, `${who(ask.requester)}, ${HOMES[ask.requester] || ''}`];
+    if (t.hasAttribute('data-you')) return ['Your home', HOMES[YOU] || ''];
+    return null;
+  }
+  svg.addEventListener('pointermove', e => {
+    const lines = tipFor(e.target);
+    if (!lines) { tip.hidden = true; return; }
+    tip.replaceChildren(...lines.map((s, i) => Object.assign(document.createElement(i ? 'span' : 'b'), { textContent: s })));
+    tip.hidden = false;
+    const box = wrap.getBoundingClientRect(), x = e.clientX - box.left, y = e.clientY - box.top;
+    tip.style.left = `${Math.min(x + 14, box.width - tip.offsetWidth - 6)}px`;
+    tip.style.top = `${y + 18 + tip.offsetHeight > box.height ? y - tip.offsetHeight - 12 : y + 18}px`;
+  });
+  svg.addEventListener('pointerleave', () => { tip.hidden = true; });
+
+  // ---- picking a route: a van drives it; a delivery shows the carbon it saved ----
   const pick = document.getElementById('pick');
+  let landing = null;
   function select(id) {
     const it = byId[id];
     if (!it) return;
-    overlay.innerHTML = '';
+    overlay.replaceChildren();
+    clearTimeout(landing);
     const open = ` <a class="inline-link" href="#post-${id}" data-open="${id}">Open the post</a>`;
     if (it.to) {
       el('path', { d: curve(it.from, it.to), class: 'route-sel' }, overlay);
-      const dot = el('circle', { r: 8, class: 'van', cx: reduced ? it.to[0] : 0, cy: reduced ? it.to[1] : 0 }, overlay);
-      if (!reduced) {
-        const anim = el('animateMotion', { dur: '1.4s', fill: 'freeze', repeatCount: '1', begin: 'indefinite' }, dot);
-        const mp = el('mpath', {}, anim);
-        mp.setAttribute('href', '#p-' + id);
-        mp.setAttributeNS('http://www.w3.org/1999/xlink', 'xlink:href', '#p-' + id);
-        anim.beginElement();
-      }
       el('circle', { cx: it.from[0], cy: it.from[1], r: 7, class: 'sel-from' }, overlay);
+      const land = () => {
+        el('circle', { cx: it.to[0], cy: it.to[1], r: 6, class: 'pop' }, overlay);
+        if (it.status === 'collected') {
+          text(it.to[0], it.to[1] - 12, `+${Math.round(it.carbon_saved_kg)} kg CO₂e saved`,
+               { class: 'float-up', 'text-anchor': 'middle' }, overlay);
+        }
+      };
+      if (reduced) {
+        el('circle', { cx: it.to[0], cy: it.to[1], r: 8, class: 'van-dot' }, overlay);
+        land();
+      } else {
+        van(id, overlay).beginElement();
+        landing = setTimeout(land, 1400);
+      }
       pick.innerHTML = `<b>${it.name}</b> · ${STATUS[it.status]} · ${km(it.km)} from ${who(it.from_owner)} to ${who(it.to_owner)}`
         + (it.status === 'collected' ? ` · <b>${Math.round(it.carbon_saved_kg)} kg CO₂e</b> saved` : '') + open;
     } else {
@@ -581,6 +758,7 @@
     document.getElementById('map-title').scrollIntoView({ block: 'start', behavior: reduced ? 'auto' : 'smooth' });
   }));
 
+  // ---- play every delivery in turn ----
   const playBtn = document.getElementById('play');
   let timer = null;
   function stop() { clearInterval(timer); timer = null; playBtn.textContent = '▶ Play deliveries'; playBtn.setAttribute('aria-pressed', 'false'); }
@@ -591,7 +769,7 @@
     let n = 0;
     select(queue[n++]);
     playBtn.textContent = '■ Stop'; playBtn.setAttribute('aria-pressed', 'true');
-    timer = setInterval(() => { if (n >= queue.length) return stop(); select(queue[n++]); }, 1700);
+    timer = setInterval(() => { if (n >= queue.length) return stop(); select(queue[n++]); }, 2200);
   });
 
   // ---- after a reload: what just happened, on the post it touched ----
