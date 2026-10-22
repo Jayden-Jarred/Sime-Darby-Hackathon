@@ -2,11 +2,11 @@
 impact.py - the Right-Fit Homes impact calculations (Member 4).
 
 Everything the other screens show comes from here:
-  - load_data(), get_fitting(), get_upgrade()   read the CSVs, look up one row
+  - load_data(), get_fitting(), get_upgrade()   read the database, look up one row
   - locked, next_id()    saves take turns; the next id to hand out
   - impact_of()          cost and carbon of ONE buyer choice (for the Advisor screen)
-  - save_buyer_choices() save a buyer's Advisor choices to choices.csv (new or signed-in buyer)
-  - add_ripout_report()  save an owner's tagged report to ripouts.csv (new or signed-in owner)
+  - save_buyer_choices() save a buyer's Advisor choices to the choices table (new or signed-in buyer)
+  - add_ripout_report()  save an owner's tagged report to the ripouts table (new or signed-in owner)
   - ripout_index()       share of owners who removed each fitting
   - advice_for(), design_feedback()   "stop installing X in unit type B" advice
   - simulate()           the What-if projection for a whole launch
@@ -15,18 +15,19 @@ Everything the other screens show comes from here:
   - upgrade_mix()        which upgrade options buyers pick, per fitting
   - dashboard_totals()   the KPI cards on the SDP dashboard
 
-All inputs come from the CSV files in data/ (see README.md for columns).
+All inputs come from the SQLite database data/right_fit.db (db.py; README.md lists the tables).
 All figures are SIMULATED: made-up homes and owners, with realistic fitting
 figures from public sources (see generate_dummy_data.py and README.md).
 """
 
 import functools
 import threading
-from pathlib import Path
 
 import pandas as pd
 
-DATA_DIR = Path(__file__).parent / "data"
+import db
+
+DATA_DIR = db.DATA_DIR
 
 # ---- Assumptions (shown on the dashboard so judges can see them) ----------
 STOP_THRESHOLD = 0.50    # rip-out rate at or above this -> "Stop installing"
@@ -36,11 +37,11 @@ CHOICES = ("keep", "opt_out", "upgrade")
 
 
 # ---- Loading and saving ----------------------------------------------------
-# Every save reads a whole CSV, changes it and writes it back. Two at the same
-# moment would overwrite each other (and hand out the same id), so every read
-# and save of data/ takes this lock in turn. One lock is enough: the app runs
-# as one process. Re-entrant, because a reset replays saves while holding it.
-# A real database would replace this with its own transactions.
+# A save reads the data, decides (the next id, the nearest neighbour) and then
+# writes. Each write is one database transaction, but two saves deciding at the
+# same moment could still pick the same id, so every read and save takes this
+# lock in turn. One lock is enough: the app runs as one process. Re-entrant,
+# because a reset replays saves while holding it.
 DATA_LOCK = threading.RLock()
 
 
@@ -65,26 +66,15 @@ MATCH_TEXT = ["to_owner", "condition", "note", "posted_at", "matched_at", "colle
 
 @locked
 def load_data(data_dir=DATA_DIR):
-    """Read the seven CSV files into DataFrames."""
-    data_dir = Path(data_dir)
-    if not (data_dir / "messages.csv").exists():
-        raise ValueError("data/ is from before the Neighbour Match community: run python generate_dummy_data.py")
-    data = {
-        "fittings": pd.read_csv(data_dir / "fittings.csv"),
-        "upgrades": pd.read_csv(data_dir / "upgrades.csv"),
-        "ripouts": pd.read_csv(data_dir / "ripouts.csv"),
-        # keep_default_na: an empty upgrade_id / listing_id / note stays "" instead of NaN
-        "choices": pd.read_csv(data_dir / "choices.csv", keep_default_na=False),
-        "matches": pd.read_csv(data_dir / "matches.csv"),
-        "requests": pd.read_csv(data_dir / "requests.csv", keep_default_na=False),
-        "messages": pd.read_csv(data_dir / "messages.csv", keep_default_na=False),
-    }
-    if "upgrade_id" not in data["choices"]:
-        raise ValueError("data/choices.csv is from before upgrade options: run python generate_dummy_data.py")
-    m = data["matches"]   # distance_km stays a number (NaN until matched); the text columns are "" when empty
-    for col in MATCH_TEXT:
-        m[col] = m[col].fillna("").astype(str)
-    return data
+    """Every table of the database as a DataFrame: fittings, upgrades, people, ripouts, choices, matches, requests, messages."""
+    if not db.exists(data_dir):
+        raise ValueError(f"No database in {data_dir}: run python generate_dummy_data.py (or just start the app)")
+    data = db.read_tables(data_dir)
+    # Empty text is NULL in the database; the pages and maths expect "" for these.
+    for table, cols in (("choices", ["upgrade_id"]), ("requests", ["listing_id", "note"]), ("matches", MATCH_TEXT)):
+        for col in cols:
+            data[table][col] = data[table][col].fillna("").astype(str)
+    return data   # matches.distance_km stays a number: NaN until matched
 
 
 def get_fitting(fittings, unit_type, fitting_id):
@@ -120,7 +110,7 @@ def impact_of(fittings, unit_type, fitting_id, choice, upgrade_id=None, upgrades
                 standard one the buyer would have torn out. The standard
                 item is never made, SDP earns the upgrade margin, and the
                 buyer avoids the rip-out cost.
-                With `upgrades` (the upgrades.csv table), the margin and name
+                With `upgrades` (the upgrades table), the margin and name
                 come from the option `upgrade_id` (default: the first one).
                 Without it, the margin is the fitting's upgrade_margin_rm.
 
@@ -209,7 +199,7 @@ def _working(r, f, kg, factor, ripout_rate):
 @locked
 def save_buyer_choices(unit_type, picks, data_dir=DATA_DIR, upgrade_picks=None, buyer_id=None):
     """
-    Save one buyer's Advisor choices to choices.csv, so the SDP dashboard
+    Save one buyer's Advisor choices to the choices table, so the SDP dashboard
     includes them. `picks` maps fitting_id -> choice; eligible fittings not in
     `picks` are saved as "keep". Fixed fittings may be sent as "keep" (they
     always are) but aren't saved. `upgrade_picks` maps fitting_id -> upgrade_id
@@ -243,15 +233,13 @@ def save_buyer_choices(unit_type, picks, data_dir=DATA_DIR, upgrade_picks=None, 
         if eligibility != "fixed":   # always installed, so not a choice to save
             rows.append((fid, imp["choice"], imp["upgrade_id"] or ""))
 
-    path, choices = Path(data_dir) / "choices.csv", data["choices"]
     if buyer_id is None:
-        buyer_id = next_id(choices.buyer_id, f"{unit_type}-B")
-    new = pd.DataFrame([(buyer_id, unit_type, fid, ch, up) for fid, ch, up in rows],
-                       columns=["buyer_id", "unit_type", "fitting_id", "choice", "upgrade_id"])
-    if (choices.buyer_id == buyer_id).any():   # this buyer confirmed before: their new choices replace the old
-        pd.concat([choices[choices.buyer_id != buyer_id], new], ignore_index=True).to_csv(path, index=False)
-    else:
-        new.to_csv(path, mode="a", header=False, index=False)
+        buyer_id = next_id(data["people"].person_id, f"{unit_type}-B")
+    with db.transaction(data_dir) as con:   # all of this buyer's choices are saved, or none
+        db.ensure_person(con, buyer_id, unit_type, "buyer")
+        con.execute("DELETE FROM choices WHERE buyer_id = ?", (buyer_id,))   # confirming again replaces them
+        db.insert_many(con, "choices", ["buyer_id", "unit_type", "fitting_id", "choice", "upgrade_id"],
+                       [(buyer_id, unit_type, fid, ch, up) for fid, ch, up in rows])
     return buyer_id
 
 
@@ -265,7 +253,7 @@ def _check_person_id(person_id, prefix, what):
 @locked
 def add_ripout_report(unit_type, fitting_ids, note, data_dir=DATA_DIR, owner_id=None):
     """
-    Save one owner's renovation report to ripouts.csv. A new owner gets a row per
+    Save one owner's renovation report to the ripouts table. A new owner gets a row per
     fitting of the unit type: removed=1 for the tagged fittings, 0 for the rest.
     `owner_id` (the signed-in owner, e.g. T2S-O001) adds the tagged fittings to
     that owner's existing rows instead, so one owner never counts twice in the
@@ -283,21 +271,17 @@ def add_ripout_report(unit_type, fitting_ids, note, data_dir=DATA_DIR, owner_id=
         raise ValueError(f"Not a fitting for {unit_type}: {', '.join(sorted(unknown))}")
     if not fitting_ids:
         raise ValueError("No fittings to record")
-    path, rip = Path(data_dir) / "ripouts.csv", data["ripouts"]
+    rip = data["ripouts"]
     clean = " ".join(str(note or "").split())[:300]   # a missing note is blank, not "None"
-    owner = owner_id or next_id(rip.owner_id, f"{unit_type}-O")
-    mine = rip.owner_id == owner
-    if mine.any():   # an owner we know: mark these fittings removed on their own rows
-        rip.loc[mine & rip.fitting_id.isin(fitting_ids), ["removed", "note"]] = [1, clean]
-        missing = [fid for fid in unit_fittings if fid not in set(rip.fitting_id[mine])]
-    else:
-        missing = unit_fittings
-    rows = [(owner, unit_type, fid, int(fid in fitting_ids), clean if fid in fitting_ids else "") for fid in missing]
-    new = pd.DataFrame(rows, columns=["owner_id", "unit_type", "fitting_id", "removed", "note"])
-    if mine.any():
-        pd.concat([rip, new], ignore_index=True).to_csv(path, index=False)
-    else:
-        new.to_csv(path, mode="a", header=False, index=False)
+    owner = owner_id or next_id(data["people"].person_id, f"{unit_type}-O")
+    have = set(rip.fitting_id[rip.owner_id == owner])   # fittings this owner already has a row for
+    with db.transaction(data_dir) as con:   # the whole report is saved, or none of it
+        db.ensure_person(con, owner, unit_type, "owner")
+        con.executemany("UPDATE ripouts SET removed = 1, note = ? WHERE owner_id = ? AND fitting_id = ?",
+                        [(clean or None, owner, fid) for fid in fitting_ids if fid in have])
+        db.insert_many(con, "ripouts", ["owner_id", "unit_type", "fitting_id", "removed", "note"],
+                       [(owner, unit_type, fid, int(fid in fitting_ids), clean if fid in fitting_ids else "")
+                        for fid in unit_fittings if fid not in have])
     return owner
 
 
@@ -352,7 +336,7 @@ def simulate(data, unit_type, homes=SIM_DEFAULTS["homes"], uptake=SIM_DEFAULTS["
 
     uptake         share of would-be rip-outs where the buyer acts before handover
     upgrade_share  of those buyers, the share who upgrade (the rest opt out)
-    credit_mult    credit as a multiple of today's credit (1.0 = as in fittings.csv)
+    credit_mult    credit as a multiple of today's credit (1.0 = as in the fittings table)
     match_rate     share of still-removed reusable fittings rehomed by Neighbour Match
     programme_cost SDP's cost to run Right-Fit for this launch (assumption, RM)
     """
@@ -475,7 +459,7 @@ def impact_by_fitting(data, unit_type=None):
 def upgrade_mix(data, unit_type=None):
     """
     Which upgrade option buyers picked, per fitting - for planning next
-    launch's specs. One row per option in upgrades.csv (in that order), with
+    launch's specs. One row per option in the upgrades table (in that order), with
     picks, share of that fitting's upgrades (0-1) and the margin earned.
     Options nobody picked are kept with 0, so SDP can see what to drop.
     Upgrades saved without an option count as the default, as in impact_of().
@@ -498,7 +482,7 @@ def upgrade_mix(data, unit_type=None):
     mix["share"] = (mix.picks / mix.fitting_upgrades.where(mix.fitting_upgrades > 0)).fillna(0.0)
     names = data["fittings"][["unit_type", "fitting_id", "name"]]
     mix = mix.merge(names, on=["unit_type", "fitting_id"], how="left")
-    # Most-upgraded fittings first; options keep their upgrades.csv order.
+    # Most-upgraded fittings first; options keep their upgrades-table order.
     mix["_order"] = range(len(mix))
     mix = mix.sort_values(["fitting_upgrades", "_order"], ascending=[False, True], kind="stable")
     return mix.drop(columns="_order").reset_index(drop=True)
