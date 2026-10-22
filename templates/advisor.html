@@ -2,7 +2,9 @@
     For each fitting the buyer picks Keep, Opt out (for a credit) or Upgrade, and which
     upgrade option (pictures in static/upgrades/). Each pick fetches its savings from
     /api/impact and shows it on the 3D home (static/house3d.js, colorBy 'choice').
-    "Confirm my choices" saves them with POST /api/choices. -#}
+    "Confirm my choices" saves them with POST /api/choices. For any opted-out fittings it then
+    shows the nearest neighbour giving one away (GET /api/buyer/nearby, buyer.py) and an
+    "Ask for one" button (POST /api/match/request), with a link to Neighbour Match (/match). -#}
 <!doctype html>
 <html lang="en">
 <head>
@@ -65,6 +67,27 @@
     </div>
   </section>
 
+  {# The rip-out index for buyers: just the share of owners who removed each fitting, in one
+     neutral colour. SDP's stop / offer / keep advice stays on the dashboard. #}
+  <section class="section" aria-labelledby="ripout-title">
+    <div class="section-head">
+      <h2 id="ripout-title">What owners of this home rip out</h2>
+      <p>Share of owners of this home type who removed each fitting after handover.</p>
+    </div>
+    <div class="panel">
+      <ol class="ripout-bars">
+        {% for f in house_fittings %}
+          {% set pct = '{:.0f}'.format(f.rate * 100) %}
+          <li data-fid="{{ f.fitting_id }}">
+            <span class="rb-name">{{ f.name }}</span>
+            <span class="rb-track" aria-hidden="true"><span style="width: {{ pct }}%"></span></span>
+            <span class="rb-value"><b>{{ pct }}%</b><small>{{ f.removed }} of {{ f.owners }} owners</small></span>
+          </li>
+        {% endfor %}
+      </ol>
+    </div>
+  </section>
+
   <div class="section">
     <div class="section-head">
       <h2>Your fittings, most ripped out first</h2>
@@ -74,11 +97,12 @@
 
   <div class="advisor-grid">
     <div class="choice-list">
+      {% set group_tags = {'opt_out': 'Can opt out', 'upgrade_only': 'Upgrade only'} %}
       {% for f in choosable %}
         {% set pct = '{:.0f}'.format(f.rate * 100) %}
         {% set mine = saved.get(f.fitting_id) or {} %}{% set my_choice = mine.choice or 'keep' %}{% set my_up = mine.upgrade_id or '' %}
         <fieldset class="choice" data-fid="{{ f.fitting_id }}">
-          <legend><h3>{{ f.name }}</h3></legend>
+          <legend><h3>{{ f.name }}</h3>{% if group_tags[f.eligibility] %}<span class="group-tag">{{ group_tags[f.eligibility] }}</span>{% endif %}</legend>
           <div class="choice-head">
             <p class="proof"><b>{{ pct }}%</b> of owners removed them ({{ f.removed }} of {{ f.owners }})</p>
             <div class="meter" aria-hidden="true"><span style="width: {{ pct }}%"></span></div>
@@ -118,16 +142,32 @@
           <div class="impact-line" aria-live="polite"></div>
         </fieldset>
       {% endfor %}
+      {#- Always installed: the fixed fittings from the data, plus services listed as text only. They aren't
+          fittings in data/fittings.csv, so they have no rip-out rate, cost or carbon. -#}
+      {% set always_text = ['Essential wiring', 'Essential plumbing'] %}
+      {#- PLACEHOLDER, replace before the demo: the items the team agrees need SDP's OK because they're tied to
+          the CCC, the sales contract or the bank's valuation. Hard-coded here on purpose (no data changes).
+          An empty list leaves just the explanation. -#}
+      {% set to_confirm = ['Placeholder item 1', 'Placeholder item 2'] %}
       <div class="not-choosable">
-        {% if included %}
-          <p class="included"><b>Always installed:</b>
-            {% for f in included %}{{ f.name }}{{ ', ' if not loop.last }}{% endfor %} (needed before handover).</p>
-        {% endif %}
-        <div class="ask-sdp">
-          <b>Not sure yet: ask SDP</b>
+        <section class="fixed-box" aria-labelledby="fixed-title">
+          <h3 id="fixed-title">Always installed</h3>
+          <p>Needed before handover, so there's nothing to choose.</p>
+          <ul class="item-list">
+            {% for f in included %}<li>{{ f.name }}</li>{% endfor %}
+            {% for name in always_text %}<li>{{ name }}</li>{% endfor %}
+          </ul>
+        </section>
+        <section class="ask-sdp" aria-labelledby="tbc-title">
+          <h3 id="tbc-title">Not sure yet</h3>
           <p>Anything linked to the CCC, your sales contract or the bank's valuation needs SDP's OK
-            before it can be left out or changed. Your sales advisor confirms which items those are.</p>
-        </div>
+            before it can be left out or changed. Your sales advisor confirms these with you.</p>
+          {% if to_confirm %}
+          <ul class="item-list">
+            {% for name in to_confirm %}<li>{{ name }}<span class="group-tag tbc">To be confirmed with SDP</span></li>{% endfor %}
+          </ul>
+          {% endif %}
+        </section>
       </div>
     </div>
 
@@ -136,14 +176,23 @@
       <p class="lead" id="changed-count">Nothing changed yet. Everything is installed as standard.</p>
       <p class="big" id="sum-total" aria-live="polite"><small>RM</small> 0</p>
       <p class="big-label">back in your pocket</p>
+      <p class="sum-calc lead-calc" id="calc-total"></p>
+      {#- Each .sum-calc line is the sum behind the total above it, filled in by renderSummary(). -#}
       <div class="sum-rows">
         <div class="sum-row"><span>Credit from SDP</span><b id="sum-credit">RM 0</b></div>
+        <p class="sum-calc" id="calc-credit"></p>
         <div class="sum-row"><span>Rip-out costs you skip</span><b id="sum-ripout">RM 0</b></div>
+        <p class="sum-calc" id="calc-ripout"></p>
         <div class="sum-row"><span>Material not wasted</span><b id="sum-material">0 kg</b></div>
+        <p class="sum-calc" id="calc-material"></p>
         <div class="sum-row"><span>Carbon never produced</span><b id="sum-carbon">0 kg CO₂e</b></div>
+        <p class="sum-calc" id="calc-carbon"></p>
+        <p class="sum-note" id="calc-uncounted"></p>
         <p class="sum-sub">For SDP</p>
         <div class="sum-row"><span>Installation saved, after credits</span><b id="sum-sdp">RM 0</b></div>
-        <div class="sum-row"><span>Margin on upgrades</span><b id="sum-margin">RM 0</b></div>
+        <p class="sum-calc" id="calc-sdp"></p>
+        <div class="sum-row"><span>SDP margin on upgrades</span><b id="sum-margin">RM 0</b></div>
+        <p class="sum-calc" id="calc-margin"></p>
       </div>
       <p class="saving-as">{% if saving_as %}Saving for <b>{{ saving_as.name }}</b>, {{ saving_as.home }}.
         Your earlier choices are filled in; confirming replaces them.
@@ -229,9 +278,23 @@
     return `<p>${line}</p>` + (working ? `<ul class="working" aria-label="How it's worked out">${working}</ul>` : '');
   }
 
+  // While any /api/impact call is still out, the totals are marked busy (dimmed) so stale numbers don't read as final.
+  const summaryBox = document.getElementById('summary');
+  let pending = 0;
+  function busy(step) {
+    pending += step;
+    summaryBox.setAttribute('aria-busy', String(pending > 0));
+  }
+
+  // The line under a total: its parts, in card order. Left empty (hidden) for a single part, which is the total itself.
+  function sumLine(id, parts) {
+    document.getElementById(id).textContent = parts.length > 1 ? parts.join(' + ') : '';
+  }
+
   function renderSummary() {
-    const chosen = Object.values(impacts).filter(i => i.choice !== 'keep');
+    const chosen = cards.map(c => impacts[c.dataset.fid]).filter(i => i && i.choice !== 'keep');
     const sum = k => chosen.reduce((a, i) => a + i[k], 0);
+    const parts = (k, fmt) => chosen.filter(i => i[k] > 0).map(i => fmt(i[k]));
     const total = sum('buyer_saving_rm'), credit = sum('buyer_credit_rm');
     document.getElementById('sum-total').innerHTML = `<small>RM</small> ${Math.round(total).toLocaleString('en-MY')}`;
     document.getElementById('sum-credit').textContent = rm(credit);
@@ -239,12 +302,110 @@
     document.getElementById('sum-sdp').textContent = rm(sum('sdp_saving_rm'));
     document.getElementById('sum-margin').textContent = rm(sum('upgrade_revenue_rm'));
     document.getElementById('sum-material').textContent = kg(sum('material_avoided_kg'));
-    document.getElementById('sum-carbon').textContent = kg(sum('carbon_avoided_kg')) + ' CO₂e';
-    document.getElementById('bar-text').textContent = `${rm(total)} back · ${kg(sum('carbon_avoided_kg'))} CO₂e saved`;
+    // Carbon has decimals: add the rounded figures the cards show, so the line under the total adds up.
+    const carbon = chosen.reduce((a, i) => a + Math.round(i.carbon_avoided_kg), 0);
+    document.getElementById('sum-carbon').textContent = kg(carbon) + ' CO₂e';
+    document.getElementById('bar-text').textContent = `${rm(total)} back · ${kg(carbon)} CO₂e saved`;
+    document.getElementById('calc-total').textContent = [[credit, 'credit'], [sum('ripout_skipped_rm'), 'rip-out you skip']]
+      .filter(([v]) => v > 0).map(([v, what]) => `${rm(v)} ${what}`).join(' + ');
+    sumLine('calc-credit', parts('buyer_credit_rm', rm));
+    sumLine('calc-ripout', parts('ripout_skipped_rm', rm));
+    sumLine('calc-material', parts('material_avoided_kg', kg));
+    sumLine('calc-carbon', parts('carbon_avoided_kg', kg));
+    sumLine('calc-sdp', parts('sdp_saving_rm', rm));
+    sumLine('calc-margin', parts('upgrade_revenue_rm', rm));
+    // impact.py counts no material or carbon for a fitting too few owners remove; its card's working says why.
+    const uncounted = chosen.filter(i => !i.carbon_counted).map(i => i.name.toLowerCase());
+    document.getElementById('calc-uncounted').textContent = uncounted.length
+      ? `Material and carbon leave out the ${uncounted.join(' and ')}: ${uncounted.length > 1 ? 'their cards explain' : 'its card explains'} why.`
+      : '';
     const n = chosen.length;
     document.getElementById('changed-count').textContent = n
       ? `${n} of ${cards.length} items changed.`
       : 'Nothing changed yet. Everything is installed as standard.';
+  }
+
+  // After Confirm: opted out of SDP's fitting for a credit, the buyer can ask a neighbour with the
+  // same house design for one they removed. A signed-in buyer opens Neighbour Match as themselves;
+  // a new buyer as the id just saved (&as=). `focus` opens one post there.
+  function matchUrl(body, focus) {
+    return `/match?unit=${encodeURIComponent(UNIT)}` + (body.name ? '' : `&as=${encodeURIComponent(body.buyer_id)}`)
+      + (focus ? `&focus=${encodeURIComponent(focus)}` : '');
+  }
+
+  function neighbourNext(optedOut, body) {
+    if (!optedOut.length) return '';
+    const names = optedOut.map(c => c.querySelector('h3').textContent.trim().toLowerCase());
+    const list = names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}` : names[0];
+    return `<div class="neighbour-next"><h3>Find one from a neighbour</h3>`
+      + `<p>You opted out of the ${esc(list)} for a credit. Neighbours with the same house design give away `
+      + `fittings they've removed, so a second-hand one fits without changes.</p>`
+      + `<ul class="nearby" aria-live="polite"><li class="nearby-status">Looking for neighbours giving one away…</li></ul>`
+      + `<a href="${esc(matchUrl(body))}">See it all on Neighbour Match →</a></div>`;
+  }
+
+  // Fills the panel from buyer.py: the nearest neighbour giving each opted-out fitting away, and
+  // "Ask for one", which posts a request on Neighbour Match (matched at once when one is waiting).
+  async function loadNearby(box, optedOut, body) {
+    const km = n => `${Number(n).toFixed(1)} km`;
+    let found;
+    try {
+      const fids = optedOut.map(c => encodeURIComponent(c.dataset.fid)).join(',');
+      const res = await fetch(`/api/buyer/nearby?unit=${encodeURIComponent(UNIT)}`
+        + `&buyer=${encodeURIComponent(body.buyer_id)}&fittings=${fids}`);
+      found = await res.json();
+      if (!res.ok) throw new Error(found.error || 'Could not look for neighbours');
+    } catch (err) {
+      box.innerHTML = `<li class="nearby-status">${esc(err.message)}</li>`;
+      return;
+    }
+    box.innerHTML = found.fittings.map(f => {
+      const n = f.nearest, mine = f.reserved;
+      if (mine) {   // one is already on its way to them (or collected): nothing more to ask for
+        return `<li><b>${esc(f.name)}</b><p class="nearby-result">`
+          + `${mine.status === 'collected' ? 'You collected one from' : 'Reserved for you by'} <b>${esc(mine.name)}</b>, `
+          + `${km(mine.distance_km)} away. <a href="${esc(matchUrl(body, mine.listing_id))}">See it →</a></p></li>`;
+      }
+      const offer = n
+        ? `${esc(n.name)} is giving one away, ${km(n.distance_km)} from you · ${esc(n.condition)}`
+          + (f.available > 1 ? ` · ${f.available - 1} more waiting` : '')
+        : 'Nobody is giving one away yet.' + (f.asking ? '' : ` Ask, and you're matched when a neighbour does.`);
+      const action = f.asking
+        ? `<p class="nearby-result">You're already asking for one. <a href="${esc(matchUrl(body))}">See it →</a></p>`
+        : `<button type="button" class="btn-ask" data-ask="${esc(f.fitting_id)}">Ask for one</button>`;
+      return `<li><b>${esc(f.name)}</b><p>${offer}</p>${action}</li>`;
+    }).join('');
+
+    box.addEventListener('click', async e => {
+      const btn = e.target.closest('[data-ask]');
+      if (!btn) return;
+      const f = found.fittings.find(x => x.fitting_id === btn.dataset.ask);
+      const old = btn.parentElement.querySelector('.nearby-error');
+      if (old) old.remove();
+      btn.disabled = true;
+      btn.textContent = 'Asking…';
+      try {
+        const res = await fetch('/api/match/request', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ unit: UNIT, requester: body.buyer_id, fitting: f.fitting_id }),
+        });
+        const r = await res.json();
+        if (!res.ok) throw new Error(r.error || 'Could not post your request');
+        const l = r.listing;   // the offer it was matched to at once, or null: the request waits
+        const giver = l && f.nearest && l.listing_id === f.nearest.listing_id ? f.nearest.name : 'a neighbour';
+        const done = document.createElement('p');
+        done.className = 'nearby-result';
+        done.innerHTML = l
+          ? `Matched with <b>${esc(giver)}</b>, ${km(l.distance_km)} away. <a href="${esc(matchUrl(body, l.listing_id))}">Arrange the pickup →</a>`
+          : `Posted. You're matched when a neighbour gives one. <a href="${esc(matchUrl(body, r.request.request_id))}">See your request →</a>`;
+        btn.replaceWith(done);
+      } catch (err) {
+        btn.disabled = false;
+        btn.textContent = 'Ask for one';
+        btn.insertAdjacentHTML('afterend', `<p class="nearby-error">${esc(err.message)}</p>`);
+      }
+    });
   }
 
   async function choose(card, choice, { focus = true } = {}) {
@@ -261,13 +422,19 @@
     }
     markActive(card);
     const line = card.querySelector('.impact-line');
+    line.innerHTML = '<p class="working-out">Working it out…</p>';
+    busy(1);
     try {
       const imp = await impactOf(fid, choice, upgrade);
       if (picks[fid] !== choice || upgradePicks[fid] !== upgrade) return;  // a newer click won
       impacts[fid] = imp;
       line.innerHTML = describe(imp);
     } catch (err) {
+      if (picks[fid] !== choice || upgradePicks[fid] !== upgrade) return;
+      delete impacts[fid];   // the old numbers belong to the previous choice
       line.textContent = err.message;
+    } finally {
+      busy(-1);
     }
     renderSummary();
   }
@@ -277,6 +444,11 @@
     card.addEventListener('change', e => choose(card, e.target.name.startsWith('u-') ? 'upgrade' : e.target.value));
     card.addEventListener('mouseenter', () => view && view.highlight(card.dataset.fid));
     card.addEventListener('mouseleave', () => view && view.clear());
+  });
+  // Pointing at a fitting in the rip-out chart picks it out in the 3D model, as its card does.
+  document.querySelectorAll('.ripout-bars li').forEach(row => {
+    row.addEventListener('mouseenter', () => view && view.highlight(row.dataset.fid));
+    row.addEventListener('mouseleave', () => view && view.clear());
   });
   // A signed-in buyer's earlier choices are already ticked: show their impact and the totals.
   cards.forEach(card => {
@@ -295,6 +467,7 @@
   document.getElementById('confirm').addEventListener('click', async () => {
     const btn = document.getElementById('confirm');
     const out = document.getElementById('result');
+    const optedOut = cards.filter(c => picks[c.dataset.fid] === 'opt_out');   // as sent, even if a click lands mid-save
     btn.disabled = true;
     btn.textContent = 'Saving…';
     try {
@@ -308,7 +481,10 @@
       const saved = body.name ? `Saved for <b>${esc(body.name)}</b>` : `Saved as buyer <b>${body.buyer_id}</b>`;
       out.innerHTML = `<div class="saved">${saved}${(body.name || '').endsWith('.') ? '' : '.'} `   // "Arjun R." has its own full stop
         + `The SDP dashboard now counts ${body.totals.buyers} buyers for this home type. `
-        + `<a href="/dashboard?unit=${encodeURIComponent(UNIT)}">See it on the dashboard →</a></div>`;
+        + `<a href="/dashboard?unit=${encodeURIComponent(UNIT)}">See it on the dashboard →</a></div>`
+        + neighbourNext(optedOut, body);
+      const nearbyBox = out.querySelector('.nearby');
+      if (nearbyBox) loadNearby(nearbyBox, optedOut, body);
     } catch (err) {
       out.innerHTML = '';
       const box = document.createElement('div');
@@ -318,6 +494,7 @@
     } finally {
       btn.disabled = false;
       btn.textContent = 'Confirm my choices';
+      if (out.firstChild) out.scrollIntoView({ behavior: 'smooth', block: 'nearest' });   // it lands below the fold
     }
   });
 </script>
