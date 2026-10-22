@@ -117,7 +117,8 @@
   </section>
 </div>
 
-<script>
+<script type="module">
+  import { esc } from "{{ url_for('static', filename='esc.js') }}";
   const UNIT = {{ unit | tojson }};
   const AI = {{ (ai_model is not none) | tojson }};
   const WAIT = AI ? 700 : 180;   // Claude: wait for a pause in typing, so it isn't asked about every half-word
@@ -130,7 +131,6 @@
   let current = { tags: [], spans: [] };
   let timer = null, seq = 0;
 
-  const esc = s => s.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
   function highlight(text, spans) {
     // Non-overlapping spans, earliest first; fitting words get a tint, removal words an underline.
