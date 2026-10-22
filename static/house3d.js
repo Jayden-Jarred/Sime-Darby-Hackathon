@@ -13,6 +13,7 @@
  *
  * Usage (see templates/dashboard.html):
  *   const view = mountHouse(el, { unit: "T2S", fittings: [...rip-out index rows] });
+ *   (each row has advice_key "stop" / "offer" / "keep", from impact.advice, which picks its colour)
  *   view.setMode("fittings"); view.setFloor("ff"); view.focus("KIT-CAB"); view.highlight("KIT-CAB");
  * The floor picker fills an element with [data-floor-picker] containing a .seg.
  *
@@ -22,6 +23,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { esc } from './esc.js';
 
 // Advice icons. Their colours come from the page's --advice-stop / -offer / -keep
 // CSS variables (set from dashboard.ADVICE_COLOUR), the same as the table badges.
@@ -30,12 +32,6 @@ export const STATUS = {
   offer: { icon: '!' },
   keep:  { icon: '✓' },
 };
-
-export function statusOf(advice = '') {
-  if (advice.startsWith('Stop')) return 'stop';
-  if (advice.startsWith('Offer')) return 'offer';
-  return 'keep';
-}
 
 const COL = {
   wall: '#f4eee2', party: '#e9e1d0', slab: '#d8d0bf', roof: '#ffffff',
@@ -428,7 +424,7 @@ export function mountHouse(el, { unit, fittings, colorBy = 'advice', initialMode
   const adviceColor = st => pageStyle.getPropertyValue('--advice-' + st).trim() || '#9a948a';  // grey if unset
   const baseColor = fid => (colorBy === 'choice'
     ? CHOICE.keep.color
-    : adviceColor(statusOf(info.get(fid).advice)));
+    : adviceColor(info.get(fid).advice_key));
 
   function fitMat(fid) {
     if (!fitMats.has(fid)) {
@@ -963,7 +959,6 @@ export function mountHouse(el, { unit, fittings, colorBy = 'advice', initialMode
   tip.hidden = true;
   el.appendChild(tip);
 
-  const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   let hovered = null, pinned = null;
 
   function setGlow(fid, on) {
@@ -974,7 +969,7 @@ export function mountHouse(el, { unit, fittings, colorBy = 'advice', initialMode
   function showTip(fid, x, y) {
     const f = info.get(fid);
     if (!f) return;
-    const st = statusOf(f.advice);
+    const st = f.advice_key;
     const last = colorBy === 'choice'
       ? (f.eligibility === 'fixed'
         ? '<span class="tip-advice">Always included</span>'
