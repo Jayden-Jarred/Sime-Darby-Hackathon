@@ -27,7 +27,7 @@ API (JSON; bad input -> 400 with an "error"):
     POST /api/match/claim    {"listing_id", "requester"}         takes one offer
     POST /api/match/comment  {"post_id", "author", "text"}       a message on a post
     POST /api/match/collect  {"listing_id", "by"?, "thanks"?}    marks it picked up
-    POST /api/reset-demo     {} (JSON)  puts every data file back to the starting demo data
+    POST /api/reset-demo     {} (JSON)  puts the demo database back to its starting data
     GET  /export/<ripout-index|impact-by-fitting|upgrade-mix|choices>.csv?unit=T2S
     POST /signin  (form: who, next?)   POST /signout
 Every POST must come from the app's own pages (another site's Origin -> 403),
@@ -364,7 +364,7 @@ def _unit_fitting_ids(data, unit):
 
 
 def _unit_names(data, unit):
-    """fitting_id -> this home type's name for it, from fittings.csv (e.g. TIL-FLR -> "Ground-floor tiles").
+    """fitting_id -> this home type's name for it, from the fittings table (e.g. TIL-FLR -> "Ground-floor tiles").
     The tagger keeps generic names; the pages show the data's, so every page names a fitting the same way."""
     f = data["fittings"][data["fittings"].unit_type == unit]
     return dict(zip(f.fitting_id, f.name))
@@ -607,7 +607,7 @@ def api_match_collect():
 @dashboard_bp.route("/api/reset-demo", methods=["POST"])
 def api_reset_demo():
     """
-    Every data file back to the starting demo data (same seed, same data every time).
+    The demo database back to its starting data (same seed, same data every time).
     Needs a JSON body ({}): a plain form on another website can't send one.
     """
     if not request.is_json:
