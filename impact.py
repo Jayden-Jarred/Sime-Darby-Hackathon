@@ -2,15 +2,17 @@
 impact.py - the Right-Fit Homes impact calculations (Member 4).
 
 Everything the other screens show comes from here:
-  - load_data(), get_fitting(), get_upgrade()   read the database, look up one row
+  - UNIT_TYPES, parse_person()   the home types; what a person id (T2S-O001) says
+  - load_data(), get_fitting(), get_upgrade(), unit_fittings()   read the database, look up rows
   - locked, next_id()    saves take turns; the next id to hand out
   - impact_of()          cost and carbon of ONE buyer choice (for the Advisor screen)
   - save_buyer_choices() save a buyer's Advisor choices to the choices table (new or signed-in buyer)
   - add_ripout_report()  save an owner's tagged report to the ripouts table (new or signed-in owner)
   - ripout_index()       share of owners who removed each fitting
-  - advice_for(), design_feedback()   "stop installing X in unit type B" advice
+  - advice(), advice_for(), design_feedback()   "stop installing X in unit type B" advice
+  - saved_choices()      a buyer's saved choices, to fill in the Advisor again
   - simulate()           the What-if projection for a whole launch
-  - reuse_carbon_kg(), reuse_summary()   Neighbour Match carbon and results
+  - reuse_carbon_kg(), rehomed_carbon_kg(), reuse_summary()   Neighbour Match carbon and results
   - choice_impacts(), impact_by_fitting()   every buyer choice, and per fitting
   - upgrade_mix()        which upgrade options buyers pick, per fitting
   - dashboard_totals()   the KPI cards on the SDP dashboard
@@ -21,6 +23,7 @@ figures from public sources (see generate_dummy_data.py and README.md).
 """
 
 import functools
+import re
 import threading
 
 import pandas as pd
@@ -28,6 +31,22 @@ import pandas as pd
 import db
 
 DATA_DIR = db.DATA_DIR
+
+# The house designs (the unit_types table is built from this).
+UNIT_TYPES = {
+    "T2S": "Double-storey terrace 20' x 70'",
+    "C3R": "3-room condominium",
+}
+
+# A person id: home type, O (homeowner) or B (buyer moving in), number. T2S-O001, C3R-B025.
+PERSON_ID = re.compile(r"([A-Z0-9]+)-([OB])(\d+)")
+ROLES = {"O": "owner", "B": "buyer"}
+
+
+def parse_person(person_id):
+    """What an id says: T2S-O001 -> ("T2S", "owner"), T2S-B025 -> ("T2S", "buyer"); anything else -> (None, None)."""
+    m = PERSON_ID.fullmatch(person_id) if isinstance(person_id, str) else None
+    return (m[1], ROLES[m[2]]) if m else (None, None)
 
 # ---- Assumptions (shown on the dashboard so judges can see them) ----------
 STOP_THRESHOLD = 0.50    # rip-out rate at or above this -> "Stop installing"
@@ -83,6 +102,12 @@ def get_fitting(fittings, unit_type, fitting_id):
     if row.empty:
         raise KeyError(f"No fitting {fitting_id} for unit type {unit_type}")
     return row.iloc[0].to_dict()
+
+
+def unit_fittings(data, unit_type):
+    """This home type's rows of the fittings table, indexed by fitting_id (empty for an unknown type)."""
+    f = data["fittings"]
+    return f[f.unit_type == unit_type].set_index("fitting_id", drop=False)
 
 
 def get_upgrade(upgrades, unit_type, fitting_id, upgrade_id=None):
@@ -210,14 +235,14 @@ def save_buyer_choices(unit_type, picks, data_dir=DATA_DIR, upgrade_picks=None, 
     Raises ValueError for an unknown fitting, a choice that isn't allowed or a
     buyer_id from another home type, KeyError for an unknown upgrade option.
     """
-    _check_person_id(buyer_id, f"{unit_type}-B", "buyer")
+    _check_person_id(buyer_id, unit_type, "buyer")
     upgrade_picks = upgrade_picks or {}
     data = load_data(data_dir)
     fittings = data["fittings"]
-    unit_fittings = fittings[fittings.unit_type == unit_type]
-    if unit_fittings.empty:
+    fits = unit_fittings(data, unit_type)
+    if fits.empty:
         raise ValueError(f"Unknown unit type {unit_type}")
-    unknown = set(picks) - set(unit_fittings.fitting_id)
+    unknown = set(picks) - set(fits.fitting_id)
     if unknown:
         raise ValueError(f"Not a fitting for {unit_type}: {', '.join(sorted(unknown))}")
     # Every option named must exist for its fitting, even one the buyer isn't upgrading.
@@ -227,7 +252,7 @@ def save_buyer_choices(unit_type, picks, data_dir=DATA_DIR, upgrade_picks=None, 
         get_upgrade(data["upgrades"], unit_type, fid, uid)   # KeyError if unknown
 
     rows = []
-    for fid, eligibility in zip(unit_fittings.fitting_id, unit_fittings.eligibility):
+    for fid, eligibility in zip(fits.fitting_id, fits.eligibility):
         imp = impact_of(fittings, unit_type, fid, picks.get(fid, "keep"),
                         upgrade_picks.get(fid), data["upgrades"])  # validates the choice
         if eligibility != "fixed":   # always installed, so not a choice to save
@@ -237,17 +262,18 @@ def save_buyer_choices(unit_type, picks, data_dir=DATA_DIR, upgrade_picks=None, 
         buyer_id = next_id(data["people"].person_id, f"{unit_type}-B")
     with db.transaction(data_dir) as con:   # all of this buyer's choices are saved, or none
         db.ensure_person(con, buyer_id, unit_type, "buyer")
-        con.execute("DELETE FROM choices WHERE buyer_id = ?", (buyer_id,))   # confirming again replaces them
+        db.delete(con, "choices", {"buyer_id": buyer_id})   # confirming again replaces them
         db.insert_many(con, "choices", ["buyer_id", "unit_type", "fitting_id", "choice", "upgrade_id"],
                        [(buyer_id, unit_type, fid, ch, up) for fid, ch, up in rows])
     return buyer_id
 
 
-def _check_person_id(person_id, prefix, what):
-    """None (a new person), or an id like T2S-B025 for this home type. Raises ValueError otherwise."""
-    if person_id is not None and not (isinstance(person_id, str) and person_id.startswith(prefix)
-                                      and person_id[len(prefix):].isdigit()):
-        raise ValueError(f"{person_id} isn't a {what} id for this home type (expected {prefix}…)")
+def _check_person_id(person_id, unit_type, role):
+    """None (a new person), or a `role` ("buyer"/"owner") id of this home type. Raises ValueError otherwise."""
+    if person_id is not None and parse_person(person_id) != (unit_type, role):
+        letter = "B" if role == "buyer" else "O"
+        raise ValueError(f"{person_id} isn't a {'homeowner' if role == 'owner' else role} id for this "
+                         f"home type (expected {unit_type}-{letter}…)")
 
 
 @locked
@@ -259,14 +285,14 @@ def add_ripout_report(unit_type, fitting_ids, note, data_dir=DATA_DIR, owner_id=
     that owner's existing rows instead, so one owner never counts twice in the
     rip-out index. Returns the owner_id.
     """
-    _check_person_id(owner_id, f"{unit_type}-O", "homeowner")
+    _check_person_id(owner_id, unit_type, "owner")
     data = load_data(data_dir)
-    unit_fittings = list(data["fittings"][data["fittings"].unit_type == unit_type].fitting_id)
-    if not unit_fittings:
+    fits = list(unit_fittings(data, unit_type).fitting_id)
+    if not fits:
         raise ValueError(f"Unknown unit type {unit_type}")
     if not all(isinstance(fid, str) for fid in fitting_ids):
         raise ValueError("fittings must be a list of fitting ids")
-    unknown = set(fitting_ids) - set(unit_fittings)
+    unknown = set(fitting_ids) - set(fits)
     if unknown:
         raise ValueError(f"Not a fitting for {unit_type}: {', '.join(sorted(unknown))}")
     if not fitting_ids:
@@ -277,11 +303,12 @@ def add_ripout_report(unit_type, fitting_ids, note, data_dir=DATA_DIR, owner_id=
     have = set(rip.fitting_id[rip.owner_id == owner])   # fittings this owner already has a row for
     with db.transaction(data_dir) as con:   # the whole report is saved, or none of it
         db.ensure_person(con, owner, unit_type, "owner")
-        con.executemany("UPDATE ripouts SET removed = 1, note = ? WHERE owner_id = ? AND fitting_id = ?",
-                        [(clean or None, owner, fid) for fid in fitting_ids if fid in have])
+        for fid in fitting_ids:
+            if fid in have:
+                db.update(con, "ripouts", {"removed": 1, "note": clean}, {"owner_id": owner, "fitting_id": fid})
         db.insert_many(con, "ripouts", ["owner_id", "unit_type", "fitting_id", "removed", "note"],
                        [(owner, unit_type, fid, int(fid in fitting_ids), clean if fid in fitting_ids else "")
-                        for fid in unit_fittings if fid not in have])
+                        for fid in fits if fid not in have])
     return owner
 
 
@@ -300,23 +327,39 @@ def ripout_index(data, unit_type=None):
     return idx.sort_values("rate", ascending=False).reset_index(drop=True)
 
 
-def advice_for(rate, eligibility):
-    """Turn a rip-out rate into plain advice for SDP."""
+def advice(rate, eligibility):
+    """
+    A rip-out rate as advice for SDP: (key, words). The key ("stop", "offer" or "keep")
+    picks the colour and icon on every page, so rewording the advice never recolours it.
+    """
     if eligibility == "fixed":
-        return "Keep (required at handover)"
+        return "keep", "Keep (required at handover)"
     if rate >= STOP_THRESHOLD:
-        return "Stop installing as standard"
+        return "stop", "Stop installing as standard"
     if rate >= OFFER_THRESHOLD:
         # Upgrade-only items (e.g. tiles) can't be left out, only upgraded.
-        return "Offer as upgrade" if eligibility == "upgrade_only" else "Offer as opt-out"
-    return "Keep as standard"
+        return "offer", "Offer as upgrade" if eligibility == "upgrade_only" else "Offer as opt-out"
+    return "keep", "Keep as standard"
+
+
+def advice_for(rate, eligibility):
+    """The advice's words alone (see advice())."""
+    return advice(rate, eligibility)[1]
 
 
 def design_feedback(data, unit_type=None):
-    """Rip-out index plus one line of advice per fitting."""
+    """Rip-out index plus one line of advice per fitting (advice) and its colour key (advice_key)."""
     idx = ripout_index(data, unit_type)
-    idx["advice"] = [advice_for(r, e) for r, e in zip(idx.rate, idx.eligibility)]
+    keys, words = zip(*[advice(r, e) for r, e in zip(idx.rate, idx.eligibility)]) if len(idx) else ((), ())
+    idx["advice_key"], idx["advice"] = list(keys), list(words)
     return idx
+
+
+def saved_choices(data, buyer_id):
+    """A buyer's saved choices, fitting_id -> {"choice", "upgrade_id"}, to fill in the Advisor again."""
+    c = data["choices"]
+    mine = c[c.buyer_id == buyer_id]
+    return {fid: {"choice": ch, "upgrade_id": up} for fid, ch, up in zip(mine.fitting_id, mine.choice, mine.upgrade_id)}
 
 
 # ---- What-if simulator ----------------------------------------------------
@@ -341,7 +384,7 @@ def simulate(data, unit_type, homes=SIM_DEFAULTS["homes"], uptake=SIM_DEFAULTS["
     programme_cost SDP's cost to run Right-Fit for this launch (assumption, RM)
     """
     idx = ripout_index(data, unit_type)[["fitting_id", "rate"]]
-    f = data["fittings"][data["fittings"].unit_type == unit_type].merge(idx, on="fitting_id")
+    f = unit_fittings(data, unit_type).reset_index(drop=True).merge(idx, on="fitting_id")
     rows = []
     for r in f.to_dict("records"):
         would = homes * r["rate"]
@@ -390,6 +433,13 @@ def reuse_carbon_kg(weight_kg, carbon_factor, distance_km):
     values or pandas columns. Used by the dashboard, the What-if and the map.
     """
     return weight_kg * carbon_factor - distance_km * 2 * TRANSPORT_KGCO2E_PER_KM
+
+
+def rehomed_carbon_kg(fitting, distance_km):
+    """reuse_carbon_kg for one fitting row (anything with weight_kg and carbon_factor), rounded to 0.1 kg.
+    A distance of None counts no trip."""
+    return round(float(reuse_carbon_kg(float(fitting["weight_kg"]), float(fitting["carbon_factor"]),
+                                       distance_km or 0)), 1)
 
 
 def reuse_summary(data, unit_type=None):
