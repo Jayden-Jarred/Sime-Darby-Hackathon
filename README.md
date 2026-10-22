@@ -143,6 +143,7 @@ file inside. On GitHub, the message next to each file says what it is.
 | `dashboard.py` | Every page and API route as one Flask Blueprint, plus the demo sign-in and the request checks (other sites, size) | Member 4 |
 | `templates/dashboard.html` | Dashboard layout | Member 4 |
 | `static/house3d.js` | 3D preview of the selected home (three.js) | Member 4 |
+| `static/esc.js` | Escapes text before the page scripts put it into HTML (one copy, shared) | Member 4 |
 | `static/vendor/` | three.js r169 + its OrbitControls and RoomEnvironment helpers, bundled so the demo runs offline | — |
 | `app.py` | The Flask app | Member 2 |
 | `templates/advisor.html` | Buyer Fit-Out Advisor screen | Member 2 |
@@ -398,12 +399,12 @@ whose view Neighbour Match shows and which home type opens first. A buyer
 signed in on the Advisor sees their earlier choices filled in, and Confirm
 replaces them (still one buyer on the dashboard). A homeowner signed in on AI
 tagging adds the report to their own rip-out record, so one owner never counts
-twice. Anyone else saves as a new buyer or owner. On these two pages the person
-always comes from the sign-in, never from the request, so nobody can save there
-as someone else. Neighbour Match's API still takes the person from the request
-(`owner`, `requester`, `author`, `by`), so the demo can act for any neighbour; a
-real login would take them from the sign-in too. Every page still works without
-signing in.
+twice. Anyone else saves as a new buyer or owner. A signed-in neighbour also
+acts as themselves on Neighbour Match: a request naming anyone else gets HTTP
+403, and **Switch neighbour** on that page signs in as the new person. With
+nobody signed in, Neighbour Match acts for the neighbour the page shows (the
+`owner`, `requester`, `author` or `by` it sends), so every page still works
+without signing in.
 
 `dashboard.signed_in()` is the one place the app asks who is signed in. The
 real login (with the database) should replace it and the `/signin` routes,
@@ -527,12 +528,14 @@ python -c "import generate_dummy_data as g; g.write_fittings(); g.write_upgrades
 | `POST /api/match/request` `{"unit", "requester", "fitting", "note"?}` | A neighbour asks for a fitting. Returns `{"request", "listing"}`; `listing` is null if nothing is waiting |
 | `POST /api/match/claim` `{"listing_id", "requester"}` | "I'd like this": takes one waiting offer. Returns `{"request", "listing"}` |
 | `POST /api/match/comment` `{"post_id", "author", "text"}` | A message under an offer or request. Returns `{"message"}` |
-| `POST /api/match/collect` `{"listing_id", "by"?, "thanks"?}` | Marks a matched listing as collected; `by` must be the giver or the neighbour taking it, and only that neighbour can add `thanks` |
+| `POST /api/match/collect` `{"listing_id", "by", "thanks"?}` | Marks a matched listing as collected; `by` must be the giver or the neighbour taking it, and only that neighbour can add `thanks` |
 | `POST /api/reset-demo` `{}` | Rebuilds all the data in `data/` (the dashboard's Reset demo data button). Needs a JSON body, so a form on another website can't trigger it |
 | `GET /export/<ripout-index or impact-by-fitting or upgrade-mix or choices>.csv?unit=T2S` | CSV downloads |
 
 Every POST must come from the app's own pages: one sent from another website
-gets HTTP 403. Bodies over 64 KB get HTTP 413. Saves take turns (one lock in
+gets HTTP 403. While a neighbour is signed in, the match routes act as them, and
+a body naming someone else (`owner`, `requester`, `author`, `by`) gets HTTP 403
+too. Bodies over 64 KB get HTTP 413. Saves take turns (one lock in
 `impact.py`), so two people saving at once can't overwrite each other.
 
 The match routes return HTTP 400 with an `error` message when a rule is broken
