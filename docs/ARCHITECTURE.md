@@ -62,7 +62,7 @@ flowchart TB
     dbpy --> sqlite
     gen --> dbpy
 
-    llm["LLM API<br/>(teammate, next)"] -. "behind tagger.tag()" .-> tagger
+    llm["Claude (Anthropic API)<br/>when a key is set"] -. "behind tagger.tag()" .-> tagger
     sdpsys["SDP renovation applications<br/>and sales system (pilot)"] -. "imports" .-> dbpy
     login["SDP account login (pilot)"] -. "replaces signed_in()" .-> dbp
 ```
@@ -283,7 +283,7 @@ sequenceDiagram
 | Data quality | Database keys, links and checks (section 4); every save in one transaction. |
 | Speed | The dashboard works out each distinct choice once (about 0.2 s per load); pages read the database fresh on each request, so edits show at once. |
 | Honest numbers | Carbon counted only for fittings at least 30% of owners remove; reuse carbon net of delivery trips; every number on the Advisor shows its working; simulated data labelled on every page. |
-| Offline demo | three.js, Plotly and fonts bundled in `static/`; no network calls. |
+| Offline demo | three.js, Plotly and fonts bundled in `static/`. The only network call is AI tagging asking Claude, and only when an API key is set; without one, or offline, the keyword rules tag every note. |
 | Reset before a demo | Dashboard button, or `python generate_dummy_data.py`: the same data every time (only Neighbour Match dates move). |
 
 ## 7. From the demo to a real pilot
@@ -297,7 +297,7 @@ functions.
 | Database | SQLite file on one laptop | A server database (e.g. PostgreSQL) with the same tables. Only `db.py` changes. |
 | Saving at the same time | One app process + lock + transactions | Several processes: drop the in-process lock, rely on database transactions and row locks. |
 | Login | Demo sign-in, no password | SDP's own account system replaces `signed_in()` and the `/signin` routes; accounts attach to `people`. |
-| AI tagging | Keyword rules (`tagger.tag()`) | An LLM through an API behind the same `tag()`, with the keyword rules as backup (as the proposal says). |
+| AI tagging | Claude behind `tagger.tag()` when an API key is set, keyword rules otherwise and as the backup | The same, on SDP's own API key. Test Claude on real owners' notes (`python tagger.py --ai` with new held-out notes) before trusting it. |
 | Where data comes from | Simulated owners, buyers and reports | SDP's renovation applications feed `ripouts`; the sales system feeds `people` and `choices`. |
 | Hosting | `python app.py` on localhost | A WSGI server (e.g. gunicorn or waitress) behind HTTPS on SDP's network. |
 | Privacy | Fictional names and addresses | Show neighbours only the distance until both agree to a pickup; keep personal data in SDP's systems. |
