@@ -5,7 +5,8 @@ neighbour_match.py - the Neighbour Match workflow (Member 3).
   request_item(unit, requester, fitting)   a neighbour asks for one
   claim(listing_id, requester)             a neighbour takes one particular offer ("I'd like this")
   comment(post_id, author, text)           a message under an offer or a request
-  collect(listing_id)                      the neighbour picked it up (with an optional thank-you)
+  collect(listing_id, by=...)              the giver or the neighbour marks it picked up (optional thank-you)
+  nearest_offer(data, unit, fitting, person)   the waiting offer `person` gets by asking
 
 Matching is instant and simple: same home type, same fitting, nearest home
 first (distances on match_map's township map). A listing nobody has asked for
@@ -63,14 +64,13 @@ def people(data, unit_type):
 
 def _check(data, unit_type, person, fitting_id):
     """The fitting can be rehomed, and the person lives in this home type. Raises ValueError."""
-    f = data["fittings"]
-    unit_fittings = f[f.unit_type == unit_type].set_index("fitting_id")
-    if unit_fittings.empty:
+    fits = impact.unit_fittings(data, unit_type)
+    if fits.empty:
         raise ValueError(f"Unknown unit type {unit_type}")
-    if fitting_id not in unit_fittings.index:
+    if fitting_id not in fits.index:
         raise ValueError(f"Not a fitting for {unit_type}: {fitting_id}")
     if fitting_id in impact.NOT_REUSABLE:
-        raise ValueError(f"{unit_fittings.name[fitting_id]} can't be rehomed: hacked-out tiles break, "
+        raise ValueError(f"{fits.name[fitting_id]} can't be rehomed: hacked-out tiles break, "
                          "and toilets and basins aren't reused for hygiene reasons")
     if person not in people(data, unit_type):
         raise ValueError(f"No owner or buyer {person} in {unit_type} homes")
@@ -81,13 +81,12 @@ def _describe(listing, data):
     f = impact.get_fitting(data["fittings"], listing["unit_type"], listing["fitting_id"])
     km = listing["distance_km"]
     km = None if km in ("", None) or pd.isna(km) else float(km)
-    collected = listing["status"] == "collected"
-    saved = impact.reuse_carbon_kg(float(f["weight_kg"]), float(f["carbon_factor"]), km) if collected else 0.0
+    saved = impact.rehomed_carbon_kg(f, km) if listing["status"] == "collected" else 0.0
     return {"listing_id": listing["listing_id"], "unit_type": listing["unit_type"],
             "fitting_id": listing["fitting_id"], "name": f["name"], "from_owner": listing["from_owner"],
             "to_owner": listing["to_owner"] or None, "distance_km": km, "status": listing["status"],
             "condition": listing["condition"], "note": listing["note"], "posted_at": listing["posted_at"],
-            "carbon_saved_kg": round(saved, 1)}
+            "carbon_saved_kg": saved}
 
 
 def _add_message(con, data, post_id, author, kind, text, now):
@@ -136,8 +135,8 @@ def list_item(unit_type, owner, fitting_id, data_dir=DATA_DIR, *, condition="Goo
     with db.transaction(data_dir) as con:   # the offer, and the request it answers, together
         db.insert(con, "matches", listing)
         if best is not None:
-            con.execute("UPDATE requests SET status = 'matched', listing_id = ? WHERE request_id = ?",
-                        (listing["listing_id"], best.request_id))
+            db.update(con, "requests", {"status": "matched", "listing_id": listing["listing_id"]},
+                      {"request_id": best.request_id})
     return _describe(listing, data)
 
 
@@ -156,25 +155,42 @@ def request_item(unit_type, requester, fitting_id, data_dir=DATA_DIR, *, note=""
     stamp = _stamp(now)
     request = {"request_id": impact.next_id(req.request_id, "R"), "requester": requester, "unit_type": unit_type,
                "fitting_id": fitting_id, "status": "open", "listing_id": "", "note": note, "posted_at": stamp}
-    waiting = m[(m.unit_type == unit_type) & (m.fitting_id == fitting_id)
-                & (m.status == "unmatched") & (m.from_owner != requester)]
+    best = nearest_offer(data, unit_type, fitting_id, requester)
     listing = None
     with db.transaction(data_dir) as con:   # the request, and the offer it takes, together
-        if not waiting.empty:
-            best = min(waiting.itertuples(),
-                       key=lambda r: (match_map.distance_km(r.from_owner, requester, unit_type), r.listing_id))
+        if best is not None:
             listing = _match(con, m, best.listing_id, requester, stamp, data)
             request.update(status="matched", listing_id=best.listing_id)
         db.insert(con, "requests", request)
     return request, listing
 
 
+def waiting_offers(data, unit_type, fitting_id, person):
+    """Offers of this fitting in this home type still waiting for someone, other than `person`'s own."""
+    m = data["matches"]
+    return m[(m.unit_type == unit_type) & (m.fitting_id == fitting_id)
+             & (m.status == "unmatched") & (m.from_owner != person)]
+
+
+def nearest_offer(data, unit_type, fitting_id, person):
+    """
+    The waiting offer `person` gets by asking for this fitting: the nearest home first,
+    then the lowest listing id. A row of the matches table, or None. The Advisor shows
+    this same offer (buyer.nearby), so asking always gets the one it showed.
+    """
+    waiting = waiting_offers(data, unit_type, fitting_id, person)
+    if waiting.empty:
+        return None
+    return min(waiting.itertuples(),
+               key=lambda r: (match_map.distance_km(r.from_owner, person, unit_type), r.listing_id))
+
+
 def _match(con, m, listing_id, requester, stamp, data):
     """Give waiting listing `listing_id` to `requester` (inside the caller's transaction). Returns the listing."""
     row = m[m.listing_id == listing_id].iloc[0].to_dict()
     km = match_map.distance_km(row["from_owner"], requester, row["unit_type"])
-    con.execute("UPDATE matches SET to_owner = ?, distance_km = ?, status = 'matched', matched_at = ? "
-                "WHERE listing_id = ?", (requester, km, stamp, listing_id))
+    db.update(con, "matches", {"to_owner": requester, "distance_km": km, "status": "matched", "matched_at": stamp},
+              {"listing_id": listing_id})
     row.update(to_owner=requester, distance_km=km, status="matched", matched_at=stamp)
     return _describe(row, data)
 
@@ -228,11 +244,12 @@ def comment(post_id, author, text, data_dir=DATA_DIR, *, now=None):
 
 
 @impact.locked
-def collect(listing_id, data_dir=DATA_DIR, *, by=None, thanks="", now=None):
+def collect(listing_id, data_dir=DATA_DIR, *, by, thanks="", now=None):
     """
     The neighbour picked the fitting up: the listing is collected and its carbon counts.
-    `by` (the giver or the neighbour who took it) is who pressed the button; the
-    neighbour who took it can leave a thank-you note, shown under the offer.
+    `by` (the giver or the neighbour who took it) is who pressed the button: nobody
+    else can mark it collected. The neighbour who took it can leave a thank-you note,
+    shown under the offer.
     """
     data = impact.load_data(data_dir)
     m = data["matches"]
@@ -242,15 +259,14 @@ def collect(listing_id, data_dir=DATA_DIR, *, by=None, thanks="", now=None):
     row = row.iloc[0]
     if row.status != "matched":
         raise ValueError(f"Listing {listing_id} is {row.status}: only a matched listing can be collected")
-    if by is not None and by not in (row.from_owner, row.to_owner):
+    if by not in (row.from_owner, row.to_owner):
         raise ValueError("Only the giver or the neighbour taking it can mark it collected")
     thanks = _text(thanks, "thank-you note")
     if thanks and by != row.to_owner:
         raise ValueError("Only the neighbour who took it can leave a thank-you note")
     stamp = _stamp(now)
     with db.transaction(data_dir) as con:   # collected, and the thank-you, together
-        con.execute("UPDATE matches SET status = 'collected', collected_at = ? WHERE listing_id = ?",
-                    (stamp, listing_id))
+        db.update(con, "matches", {"status": "collected", "collected_at": stamp}, {"listing_id": listing_id})
         if thanks:
             _add_message(con, data, listing_id, by, "thanks", thanks, stamp)
     return _describe(dict(row.to_dict(), status="collected", collected_at=stamp), data)
@@ -260,7 +276,8 @@ def suggestions(data, unit_type):
     """
     Who could list what (owners who reported removing a reusable fitting and
     haven't listed it), and who could ask (this type's buyers). Each list puts
-    first the entries that would match straight away.
+    first the entries that would match straight away. buyer_asking: the latest
+    buyer with an open request and the fitting they want (or None), for the demo sign-in.
     """
     r, m, req = data["ripouts"], data["matches"], data["requests"]
     listed = set(zip(m.from_owner, m.fitting_id))
@@ -271,4 +288,8 @@ def suggestions(data, unit_type):
     can_list.sort(key=lambda p: p[1] not in open_asks)            # instant matches first
     c = data["choices"]
     buyers = sorted(set(c.buyer_id[c.unit_type == unit_type]))
-    return {"can_list": can_list, "buyers": buyers, "open_asks": sorted(open_asks), "waiting": sorted(waiting)}
+    asking = req[(req.unit_type == unit_type) & (req.status == "open")]
+    asking = asking[[impact.parse_person(p)[1] == "buyer" for p in asking.requester]]
+    buyer_asking = (asking.requester.iloc[-1], asking.fitting_id.iloc[-1]) if not asking.empty else None
+    return {"can_list": can_list, "buyers": buyers, "open_asks": sorted(open_asks), "waiting": sorted(waiting),
+            "buyer_asking": buyer_asking}
