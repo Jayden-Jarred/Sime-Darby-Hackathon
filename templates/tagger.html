@@ -1,7 +1,8 @@
 {#- AI tagging  ·  /tagger?unit=T2S  ·  rendered by dashboard.tagger_page()
-    Type a messy renovation note: POST /api/tag (tagger.tag) highlights the words and
-    suggests fittings; "Add as a rip-out report" saves it with POST /api/report, which
-    updates the rip-out index. Also shows the tagger's honest held-out accuracy. -#}
+    Type a messy renovation note: POST /api/tag (tagger.tag: Claude when an API key is set,
+    the keyword rules otherwise) highlights the words and suggests fittings; "Add as a
+    rip-out report" saves it with POST /api/report, which updates the rip-out index.
+    Also shows the keyword rules' honest held-out accuracy. -#}
 <!doctype html>
 <html lang="en">
 <head>
@@ -49,6 +50,7 @@
       <div class="tag-out" aria-live="polite">
         <p class="field-label">What the tagger read</p>
         <p class="hl" id="hl"></p>
+        <p class="engine" id="engine"></p>
         <p class="field-label">Fittings found</p>
         <div id="tags" class="tag-list"></div>
       </div>
@@ -63,7 +65,7 @@
     </section>
 
     <aside class="summary" aria-labelledby="acc-title">
-      <h2 id="acc-title">How accurate is it?</h2>
+      <h2 id="acc-title">{{ 'How accurate is the backup?' if ai_model else 'How accurate is it?' }}</h2>
       {% set h = ev.held_out %}
       <p class="big">{{ '{:.0f}'.format(100 * h.correct / h.n) }}<small>%</small></p>
       <p class="big-label">right on {{ h.n }} test notes the word lists were never tuned to</p>
@@ -79,15 +81,22 @@
           <p class="acc-note">Slang the word lists don't know yet, which is exactly where an AI model helps.</p>
         {% endif %}
       </div>
+      {% if ai_model %}
+      <p class="fine-print">Notes you type are read by Claude (<code>{{ ai_model }}</code>) through the Anthropic API.
+        These numbers are for the backup: keyword rules in English, Malay and Manglish that run offline and
+        take over whenever Claude can't answer. <code>python tagger.py --ai</code> tests Claude on the same notes.</p>
+      {% else %}
       <p class="fine-print">This is a keyword tagger: English, Malay and Manglish word lists plus a few rules.
-        It runs offline. Member 3 can swap in an AI model by replacing <code>tag()</code> in <code>tagger.py</code>.</p>
+        It runs offline. To have Claude read the notes, with these rules as the backup,
+        <code>pip install anthropic</code>, set <code>ANTHROPIC_API_KEY</code> and restart the app.</p>
+      {% endif %}
     </aside>
   </div>
 
   <section class="section" aria-labelledby="recent-title">
     <div class="section-head">
       <h2 id="recent-title">Latest reports for this home type</h2>
-      <p>Each note, what the tagger made of it, and whether that matches the right answer.</p>
+      <p>Each note, what the {{ 'keyword rules' if ai_model else 'tagger' }} made of it, and whether that matches the right answer.</p>
     </div>
     <div class="panel">
       <table>
@@ -110,8 +119,11 @@
 
 <script>
   const UNIT = {{ unit | tojson }};
+  const AI = {{ (ai_model is not none) | tojson }};
+  const WAIT = AI ? 700 : 180;   // Claude: wait for a pause in typing, so it isn't asked about every half-word
   const noteEl = document.getElementById('note');
   const hl = document.getElementById('hl');
+  const engineEl = document.getElementById('engine');
   const tagsEl = document.getElementById('tags');
   const addBtn = document.getElementById('add');
   const added = document.getElementById('added');
@@ -137,6 +149,10 @@
   function render(note, res) {
     current = res;
     hl.innerHTML = note.trim() ? highlight(note, res.spans) : '<span class="muted">Type a note above.</span>';
+    engineEl.textContent = !note.trim() ? ''
+      : res.engine === 'ai' ? `Read by Claude (${res.model})`
+      : res.ai_error ? `Read by the keyword rules: ${res.ai_error}.`
+      : 'Read by the keyword rules (offline)';
     if (!res.tags.length) {
       tagsEl.innerHTML = '<p class="muted">No tracked fittings found' + (note.trim() ? '. Try naming the item, e.g. "kabinet" or "wardrobe".' : '.') + '</p>';
     } else {
@@ -172,6 +188,7 @@
 
   async function run() {
     const note = noteEl.value, my = ++seq;
+    if (AI && note.trim()) engineEl.textContent = 'Claude is reading the note…';
     try {
       const res = await fetch('/api/tag', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -179,11 +196,12 @@
       }).then(r => r.json());
       if (my === seq) render(note, res);
     } catch (e) {
+      engineEl.textContent = '';
       tagsEl.innerHTML = '<p class="muted">Could not reach the tagger. Is the app running?</p>';
     }
   }
 
-  noteEl.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(run, 180); added.innerHTML = ''; });
+  noteEl.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(run, WAIT); added.innerHTML = ''; });
   document.querySelectorAll('.ex').forEach(b => b.addEventListener('click', () => {
     noteEl.value = b.dataset.note; added.innerHTML = ''; run(); noteEl.focus();
   }));
