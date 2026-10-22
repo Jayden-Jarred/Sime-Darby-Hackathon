@@ -8,8 +8,8 @@ Re-run any time:
 
     python generate_dummy_data.py
 
-It writes seven CSV files into data/. Column meanings are in README.md.
-The random seed is fixed, so the same data comes out every run: that is
+It builds the SQLite database data/right_fit.db (tables in db.py, columns in
+README.md). The random seed is fixed, so the same data comes out every run: that is
 what the dashboard's "Reset demo data" button (POST /api/reset-demo) does.
 Only the Neighbour Match dates move: they count back from the hour you run
 it, so the community feed always looks recent in a demo.
@@ -19,17 +19,15 @@ and buyer choices added through the app):
     python -c "import generate_dummy_data as g; g.write_fittings(); g.write_upgrades()"
 """
 
-import csv
 import random
 from datetime import datetime, timedelta
-from pathlib import Path
 
+import db
 import impact
 import neighbour_match
 
 SEED = 42
-DATA = Path(__file__).parent / "data"
-DATA.mkdir(exist_ok=True)
+DATA = db.DATA_DIR
 
 UNIT_TYPES = {
     "T2S": "Double-storey terrace 20' x 70'",
@@ -109,7 +107,7 @@ FITTINGS = [
 
 
 def fitting_rows():
-    """FITTINGS plus credit_rm and upgrade_margin_rm, as written to fittings.csv."""
+    """FITTINGS plus credit_rm and upgrade_margin_rm, as saved in the fittings table."""
     rows = []
     for unit, fid, name, elig, material, kg, factor, install, removal in FITTINGS:
         credit = round(install * CREDIT_SHARE, -1) if elig == "opt_out" else 0
@@ -218,42 +216,50 @@ THANKS = ["Fits perfectly, thank you so much!", "Terima kasih! Dah pasang, macam
 STAMP = "%Y-%m-%d %H:%M"
 
 
-def write(name, header, rows):
-    with open(DATA / name, "w", newline="", encoding="utf-8") as f:
-        w = csv.writer(f)
-        w.writerow(header)
-        w.writerows(rows)
+def _replace(table, columns, rows):
+    """Replace every row of one table, keeping the rest of the database. Rows elsewhere that
+    point at this table are checked when the transaction ends, so the same keys can come back."""
+    with db.transaction(DATA) as con:
+        con.execute("PRAGMA defer_foreign_keys = ON")
+        con.execute(f"DELETE FROM {table}")
+        db.insert_many(con, table, columns, rows)
 
 
 def write_upgrades():
-    """upgrades.csv: one row per upgrade option per fitting per unit type.
+    """The upgrades table: one row per upgrade option per fitting per unit type.
     On its own (python -c "import generate_dummy_data as g; g.write_upgrades()")
     it refreshes the options without resetting the rest of the data."""
     upgrades = [(unit, fid, uid, name, desc, round(margin * mult / 10) * 10, f"upgrades/{uid.lower()}.svg")
                 for unit, fid, *_, margin in fitting_rows()
                 for uid, name, desc, mult in UPGRADES.get(fid, [])]
-    write("upgrades.csv",
-          ["unit_type", "fitting_id", "upgrade_id", "name", "description", "margin_rm", "image"], upgrades)
+    _replace("upgrades", ["unit_type", "fitting_id", "upgrade_id", "name", "description", "margin_rm", "image"],
+             upgrades)
     return upgrades
 
 
 def write_fittings():
-    """fittings.csv. On its own (see the module docstring) it refreshes the
-    numbers without resetting the rest of the data."""
-    write("fittings.csv",
-          ["unit_type", "fitting_id", "name", "eligibility", "material",
-           "weight_kg", "carbon_factor", "install_cost_rm",
-           "removal_cost_rm", "credit_rm", "upgrade_margin_rm"],
-          fitting_rows())
+    """The unit_types and fittings tables. On its own (see the module docstring) it
+    refreshes the numbers without resetting the rest of the data."""
+    _replace("unit_types", ["unit_type", "name"], list(UNIT_TYPES.items()))
+    _replace("fittings", ["unit_type", "fitting_id", "name", "eligibility", "material",
+                          "weight_kg", "carbon_factor", "install_cost_rm",
+                          "removal_cost_rm", "credit_rm", "upgrade_margin_rm"], fitting_rows())
+
+
+def ensure_database():
+    """Build the demo database if there isn't one yet (a fresh clone): the app and the tests call this."""
+    if not db.exists(DATA):
+        main()
 
 
 @impact.locked   # a reset from the dashboard waits for any save in progress, and pages wait for it
 def main():
     random.seed(SEED)   # every run, so a reset always gives the same demo data
+    db.create(DATA)     # every table, empty
     write_fittings()
     upgrades = write_upgrades()
 
-    # ripouts.csv: one row per owner per fitting.
+    # ripouts: one row per owner per fitting.
     ripouts = []
     for unit, owners in (("T2S", 150), ("C3R", 100)):
         unit_fittings = [f[1] for f in FITTINGS if f[0] == unit]
@@ -263,10 +269,8 @@ def main():
                 removed = random.random() < RIPOUT_RATE[(unit, fid)]
                 note = random.choice(NOTES[fid]) if removed else ""
                 ripouts.append((owner, unit, fid, int(removed), note))
-    write("ripouts.csv",
-          ["owner_id", "unit_type", "fitting_id", "removed", "note"], ripouts)
 
-    # choices.csv: what NEW buyers pick in the Fit-Out Advisor.
+    # choices: what NEW buyers pick in the Fit-Out Advisor.
     # Assumption: buyers who would have ripped an item out mostly act on it.
     # Upgrade picks use their own random stream, so the rest of the data
     # comes out the same as before upgrade options existed.
@@ -288,20 +292,22 @@ def main():
                 else:
                     choice = "keep"
                 choices.append((buyer, unit, fid, choice, upgrade_id))
-    write("choices.csv",
-          ["buyer_id", "unit_type", "fitting_id", "choice", "upgrade_id"], choices)
 
-    # matches.csv + requests.csv + messages.csv: Neighbour Match. Owners offer
+    # people (every owner and buyer above), then their reports and choices, in one transaction
+    owners = dict.fromkeys((o, u) for o, u, *_ in ripouts)
+    buyers = dict.fromkeys((b, u) for b, u, *_ in choices)
+    with db.transaction(DATA) as con:
+        db.insert_many(con, "people", ["person_id", "unit_type", "role"],
+                       [(p, u, "owner") for p, u in owners] + [(p, u, "buyer") for p, u in buyers])
+        db.insert_many(con, "ripouts", ["owner_id", "unit_type", "fitting_id", "removed", "note"], ripouts)
+        db.insert_many(con, "choices", ["buyer_id", "unit_type", "fitting_id", "choice", "upgrade_id"], choices)
+
+    # matches + requests + messages: Neighbour Match. Owners offer
     # reusable fittings they removed and buyers of the same home type ask for
     # them, in a random order over six weeks, and each goes through the app's own
     # functions (neighbour_match.py), so the starting data follows exactly the
     # rules the live app uses. Most matched fittings have been collected; some
     # posts have a chat, and some pick-ups a thank-you.
-    write("matches.csv", ["listing_id", "from_owner", "unit_type", "fitting_id", "to_owner", "distance_km",
-                          "status", "condition", "note", "posted_at", "matched_at", "collected_at"], [])
-    write("requests.csv", ["request_id", "requester", "unit_type", "fitting_id", "status", "listing_id",
-                           "note", "posted_at"], [])
-    write("messages.csv", ["message_id", "post_id", "author", "kind", "text", "posted_at"], [])
     reusable_removed = [(o, u, f) for o, u, f, removed, _ in ripouts if removed and f not in impact.NOT_REUSABLE]
     events = [("list", *row) for row in random.sample(reusable_removed, 40)]
     for unit, buyers, asks in (("T2S", 100, 20), ("C3R", 60, 12)):
@@ -361,7 +367,7 @@ def main():
 
     print(f"Wrote {len(FITTINGS)} fittings, {len(upgrades)} upgrade options, {len(ripouts)} rip-out rows, "
           f"{len(choices)} choices, {len(data['matches'])} listings, {len(data['requests'])} requests, "
-          f"{len(data['messages'])} messages to {DATA}/")
+          f"{len(data['messages'])} messages to {db.path(DATA)}")
 
 
 if __name__ == "__main__":
