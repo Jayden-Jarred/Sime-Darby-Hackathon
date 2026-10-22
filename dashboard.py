@@ -187,7 +187,7 @@ def _same_site_only():
 
 
 def _data():
-    # Re-read every request so edited CSVs show up without a restart.
+    # Re-read every request so saves and a reset show up without a restart.
     return impact.load_data()
 
 
