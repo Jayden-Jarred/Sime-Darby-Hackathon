@@ -36,21 +36,16 @@ BADGES = [("Giver", "gave a fitting to a neighbour"),
 STAMP = "%Y-%m-%d %H:%M"
 
 
-def _unit_of(pid):
-    return pid.split("-")[0] if isinstance(pid, str) and "-" in pid else ""
-
-
 def person(pid):
-    """A neighbour as the page shows them. The home type comes from the id (T2S-O001)."""
-    unit = _unit_of(pid)
+    """A neighbour as the page shows them. The home type and role come from the id (T2S-O001)."""
+    unit, role = impact.parse_person(pid)
     n = match_map.home_number(pid) + (17 if unit == "C3R" else 0)   # C3R gets a different name order
     first, initial = FIRST_NAMES[n % len(FIRST_NAMES)], INITIALS[(n // len(FIRST_NAMES) + n) % len(INITIALS)]
-    owner = "-O" in pid
     return {"id": pid, "name": f"{first} {initial}.",
             "initials": (first[0] + initial).upper(),
             "colour": AVATAR_COLOURS[n % len(AVATAR_COLOURS)],
             "home": match_map.address(pid, unit),
-            "role": "Homeowner" if owner else "Moving in"}
+            "role": "Homeowner" if role == "owner" else "Moving in"}
 
 
 def everyone(data, unit_type):
@@ -78,10 +73,6 @@ def ago(stamp, now):
 
 def _km(v):
     return None if v in ("", None) or pd.isna(v) else float(v)
-
-
-def _saved(fit, km):
-    return round(float(impact.reuse_carbon_kg(float(fit.weight_kg), float(fit.carbon_factor), km)), 1)
 
 
 def _threads(data, now):
@@ -116,7 +107,7 @@ def feed(data, unit_type, you=None, now=None):
     as posts, latest activity first.
     """
     now = now or datetime.now()
-    fits = data["fittings"][data["fittings"].unit_type == unit_type].set_index("fitting_id")
+    fits = impact.unit_fittings(data, unit_type)
     m = data["matches"][data["matches"].unit_type == unit_type]
     req = data["requests"][data["requests"].unit_type == unit_type]
     threads = _threads(data, now)
@@ -140,7 +131,7 @@ def feed(data, unit_type, you=None, now=None):
             "weight_kg": float(fit.weight_kg), "author": person(r["from_owner"]),
             "ago": ago(r["posted_at"], now), "condition": r["condition"], "note": r["note"],
             "status": status, "other": other, "km": km, "km_from_you": km_from_you(r["from_owner"]),
-            "carbon_saved_kg": _saved(fit, km) if status == "collected" else 0.0,
+            "carbon_saved_kg": impact.rehomed_carbon_kg(fit, km) if status == "collected" else 0.0,
             "when": ago(r["collected_at"] or r["matched_at"], now),
             "ask_note": ask_notes.get(r["listing_id"], ""),
             "messages": msgs, "mine": r["from_owner"] == you or r["to_owner"] == you,
@@ -178,12 +169,12 @@ def feed(data, unit_type, you=None, now=None):
 
 def you_card(data, unit_type, you):
     """Your profile on the page: your giving and taking, badges, and what you could offer now."""
-    fits = data["fittings"][data["fittings"].unit_type == unit_type].set_index("fitting_id")
+    fits = impact.unit_fittings(data, unit_type)
     m = data["matches"][data["matches"].unit_type == unit_type]
     req = data["requests"][data["requests"].unit_type == unit_type]
     gave = m[(m.from_owner == you) & (m.status == "collected")]
     took = m[(m.to_owner == you) & (m.status == "collected")]
-    carbon = sum(_saved(fits.loc[r.fitting_id], _km(r.distance_km)) for r in gave.itertuples())
+    carbon = sum(impact.rehomed_carbon_kg(fits.loc[r.fitting_id], _km(r.distance_km)) for r in gave.itertuples())
     asked = set(req.fitting_id[(req.status == "open") & (req.requester != you)])
     earned = {"Giver": len(gave) >= 1, "Super neighbour": len(gave) >= 3, "Second life": len(took) >= 1}
     return {
@@ -198,21 +189,21 @@ def you_card(data, unit_type, you):
 
 def leaderboard(data, unit_type, top=5):
     """The neighbours who gave the most, by carbon saved (fittings collected)."""
-    fits = data["fittings"][data["fittings"].unit_type == unit_type].set_index("fitting_id")
+    fits = impact.unit_fittings(data, unit_type)
     m = data["matches"]
     done = m[(m.unit_type == unit_type) & (m.status == "collected")]
     board = {}
     for r in done.itertuples():
         b = board.setdefault(r.from_owner, {"person": person(r.from_owner), "gave": 0, "carbon_kg": 0.0})
         b["gave"] += 1
-        b["carbon_kg"] += _saved(fits.loc[r.fitting_id], _km(r.distance_km))
+        b["carbon_kg"] += impact.rehomed_carbon_kg(fits.loc[r.fitting_id], _km(r.distance_km))
     return sorted(board.values(), key=lambda b: (-b["carbon_kg"], b["person"]["name"]))[:top]
 
 
 def activity(data, unit_type, now=None, top=8):
     """The latest offers, requests, matches and pick-ups, newest first."""
     now = now or datetime.now()
-    names = data["fittings"][data["fittings"].unit_type == unit_type].set_index("fitting_id").name
+    names = impact.unit_fittings(data, unit_type).name
     m = data["matches"][data["matches"].unit_type == unit_type]
     req = data["requests"][data["requests"].unit_type == unit_type]
     events = []
@@ -241,4 +232,4 @@ def stats(data, unit_type):
     req = data["requests"][data["requests"].unit_type == unit_type]
     msgs = data["messages"]
     ids = set(m.from_owner) | set(m.to_owner) | set(req.requester) | set(msgs.author)
-    return {"neighbours": len({p for p in ids if _unit_of(p) == unit_type})}
+    return {"neighbours": len({p for p in ids if impact.parse_person(p)[0] == unit_type})}
