@@ -145,7 +145,7 @@
           <thead><tr><th>Fitting</th><th class="num">Removed</th><th>Advice</th></tr></thead>
           <tbody>
           {% for row in feedback %}
-            {% set cls = 'stop' if row.advice.startswith('Stop') else ('offer' if row.advice.startswith('Offer') else 'keep') %}
+            {% set cls = row.advice_key %}
             {% set icon = '✕' if cls == 'stop' else ('!' if cls == 'offer' else '✓') %}
             <tr data-fid="{{ row.fitting_id }}" tabindex="0" title="Show in 3D">
               <td>{{ row.name }}</td>
