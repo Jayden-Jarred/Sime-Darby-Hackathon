@@ -152,7 +152,7 @@ file inside. On GitHub, the message next to each file says what it is.
 | `templates/simulate.html` | What-if simulator page (maths in `impact.simulate()`) | Member 4 |
 | `neighbour_match.py` | Neighbour Match actions: offer, ask, instant nearest match, claim an offer, answer a request, message, collect with a thank-you | Member 3 |
 | `community.py` | The people side of Neighbour Match: names, the feed, your profile and badges, top neighbours, recent activity | Member 3 |
-| `match_map.py` | Gives each home a spot and an address on the fictional township map, and measures the distance between two homes | Member 4 |
+| `match_map.py` | Gives each home a spot and an address on the fictional township map, measures the distance between two homes, and lists the offers and requests the map draws | Member 4 |
 | `templates/match.html` | Neighbour Match community page: composer, feed, sidebar, map | Member 4 |
 | `static/app.css` | Shared styles and brand (forest green + terracotta) | — |
 | `templates/_topbar.html` | Logo, page menu and who is signed in, shared by every page | — |
@@ -398,9 +398,12 @@ whose view Neighbour Match shows and which home type opens first. A buyer
 signed in on the Advisor sees their earlier choices filled in, and Confirm
 replaces them (still one buyer on the dashboard). A homeowner signed in on AI
 tagging adds the report to their own rip-out record, so one owner never counts
-twice. Anyone else saves as a new buyer or owner. The person always comes from
-the sign-in, never from the request, so nobody can save as someone else. Every
-page still works without signing in.
+twice. Anyone else saves as a new buyer or owner. On these two pages the person
+always comes from the sign-in, never from the request, so nobody can save there
+as someone else. Neighbour Match's API still takes the person from the request
+(`owner`, `requester`, `author`, `by`), so the demo can act for any neighbour; a
+real login would take them from the sign-in too. Every page still works without
+signing in.
 
 `dashboard.signed_in()` is the one place the app asks who is signed in. The
 real login (with the database) should replace it and the `/signin` routes,
