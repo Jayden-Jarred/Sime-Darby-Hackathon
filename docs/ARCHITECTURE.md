@@ -7,7 +7,10 @@ function reads and writes one shared SQLite database. For the demo it runs
 offline on one laptop: Python, Flask, pandas, Plotly and three.js, with no
 internet and no other services.
 
-The diagrams below are Mermaid, which GitHub draws on this page.
+![System architecture: who uses it, the four layers with each technology's logo, Claude optional, and what a pilot adds](architecture.png)
+
+The same picture is Appendix C of the pitch deck. The diagrams below are
+Mermaid, which GitHub draws on this page.
 
 ## 1. The big picture
 
