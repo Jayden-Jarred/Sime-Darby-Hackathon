@@ -34,7 +34,7 @@ except ImportError:   # optional: without it the keyword rules do all the taggin
 log = logging.getLogger(__name__)
 
 # ---- word lists (lower-case; \b = word boundary) ------------------------
-P = {
+WORD_LISTS = {   # name -> regex of the words that mean it
     "cabinet": r"\b(?:cabinets?|kabinet|cupboards?|almari dapur|(?:upper|lower|base|wall) (?:cabinets?|units?))\b",
     "kitchen": r"\b(?:kitchen|dapur)\b",
     "full_kitchen": r"\b(?:full|whole|entire|redo(?: the)?|semua) kitchen\b|\bkitchen (?:semua|baru)\b|\bredo (?:the )?(?:full |whole )?kitchen\b",
@@ -49,7 +49,7 @@ P = {
     "action": r"\b(?:hack(?:ed)?|hak|remove[ds]?|removed|buang|tukar|change[ds]?|replace[ds]?|ganti|tear|torn|rip(?:ped)?|"
               r"dismantle[ds]?|redo(?:ne)?|swap(?:ped)?|install new|new|baru|gone)\b",
 }
-RX = {k: re.compile(v) for k, v in P.items()}
+WORD_RX = {k: re.compile(v) for k, v in WORD_LISTS.items()}
 
 NAMES = {
     "KIT-CAB": "Kitchen cabinets", "KIT-TOP": "Kitchen top", "WRD-MST": "Master bedroom wardrobe",
@@ -113,7 +113,7 @@ def _one_guess_left(tags):
 def keyword_tag(note, unit_type=None, fitting_ids=None):
     """The keyword rules: same inputs and outputs as tag(). unit_type isn't used here."""
     text = (note or "").lower()
-    hits = {k: _spans(rx, text) for k, rx in RX.items()}
+    hits = {k: _spans(rx, text) for k, rx in WORD_RX.items()}
     score, reason, spans = {}, {}, []
 
     def add(fid, conf, why, keys):
