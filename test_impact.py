@@ -9,7 +9,9 @@ never change. Run it after editing impact.py, dashboard.py or the data.
 
 import generate_dummy_data
 import impact
+import tagger
 
+tagger._client = lambda: None           # offline: no calls to Claude even if ANTHROPIC_API_KEY is set (a stand-in is used below)
 generate_dummy_data.ensure_database()   # a fresh clone builds data/right_fit.db first
 data = impact.load_data()
 F = data["fittings"]
@@ -545,6 +547,69 @@ web.post("/signin", data={"who": "T2S-O001"})
 assert f"Adds to <b>{community.person('T2S-O001')['name']}</b>" in web.get("/tagger?unit=T2S").data.decode()
 web.post("/signout")
 assert "Saves as a new buyer" in web.get("/advisor?unit=T2S").data.decode()
+
+# AI tagging with a stand-in for Claude's API (no network, no key): what is sent, how the answer
+# is used, and the keyword rules taking over when there's no usable answer
+import json
+import logging
+from types import SimpleNamespace as NS
+logging.getLogger("tagger").setLevel(logging.ERROR)   # the fallbacks below are on purpose
+asked = []
+
+
+def claude_says(answer, stop="end_turn"):
+    def create(**request):
+        asked.append(request)
+        text = answer if isinstance(answer, str) else json.dumps(answer)
+        return NS(stop_reason=stop, content=[NS(type="thinking", thinking=""), NS(type="text", text=text)])
+    tagger._ask_claude.cache_clear()
+    tagger._client = lambda: NS(beta=NS(messages=NS(create=create)))
+
+
+def said(fid, conf, evidence, room_not_stated=False):
+    return {"fitting_id": fid, "confidence": conf, "reason": "r", "evidence": evidence, "room_not_stated": room_not_stated}
+
+
+try:
+    note = "Contractor HACKED the almari in bilik utama, tukar quartz top"
+    claude_says({"tags": [said("WRD-MST", 0.92, ["almari", "bilik utama"]), said("KIT-TOP", 0.8, ["quartz top", "granite"]),
+                          said("LGT-DEC", 0.2, ["lampu"])], "removed": True, "removal_words": ["hacked", "tukar"]})
+    r = tagger.tag(note, "T2S", {"WRD-MST", "KIT-TOP", "LGT-DEC"})
+    assert r["engine"] == "ai" and [(t["fitting_id"], t["confidence"]) for t in r["tags"]] == [("WRD-MST", 0.92), ("KIT-TOP", 0.8)], r
+    # highlights: found in the note by the app (any case), so words that aren't there ("granite") mark nothing
+    assert {(note[s["start"]:s["end"]], s["fitting_id"]) for s in r["spans"]} == {
+        ("almari", "WRD-MST"), ("bilik utama", "WRD-MST"), ("quartz top", "KIT-TOP"), ("HACKED", "action"), ("tukar", "action")}
+    sent = asked[-1]
+    assert sent["model"] == tagger.MODEL and sent["system"] == tagger.SYSTEM and f"<note>\n{note}\n</note>" in sent["messages"][0]["content"]
+    assert sent["output_config"]["format"]["schema"]["properties"]["tags"]["items"]["properties"]["fitting_id"]["enum"] == ["KIT-TOP", "LGT-DEC", "WRD-MST"]
+    tagger.tag(note, "T2S", {"WRD-MST", "KIT-TOP", "LGT-DEC"})
+    assert len(asked) == 1                    # the same note again comes from the cache, not another call
+    claude_says({"tags": [said("WRD-BR2", 0.9, ["kids room"])], "removed": True, "removal_words": []})
+    assert tagger.tag("kids room wardrobe out", "C3R", {"WRD-MST", "KIT-CAB"})["tags"] == []   # not a fitting this home has
+    # a wardrobe with no room: two guesses for one item are a pick-one, unless only one is left
+    claude_says({"tags": [said("WRD-MST", 0.5, ["wardrobe"], True), said("WRD-BR2", 0.45, ["wardrobe"], True)],
+                 "removed": True, "removal_words": ["removed"]})
+    assert {t["pick_one"] for t in tagger.tag("wardrobe removed", "T2S")["tags"]} == {"wardrobe"}
+    assert [t["pick_one"] for t in tagger.tag("wardrobe removed", "T2S", {"WRD-MST"})["tags"]] == [None]
+    for answer, stop, why in (("", "refusal", "Claude declined to read this note"),
+                              ('{"tags": [', "max_tokens", "Claude's answer was cut off (max_tokens)"),
+                              ("not json", "end_turn", "Claude's answer couldn't be read"),
+                              ({"tags": [{"fitting_id": "KIT-CAB"}]}, "end_turn", "Claude's answer couldn't be read")):
+        claude_says(answer, stop)
+        r = tagger.tag("hak semua kabinet dapur", "T2S")
+        assert r["engine"] == "keywords" and r["ai_error"] == why, (stop, r)
+        assert r["tags"] == tagger.keyword_tag("hak semua kabinet dapur")["tags"]
+    # the page: only the typed note goes to Claude; the accuracy and the table stay on the keyword rules
+    claude_says({"tags": [said("TIL-FLR", 0.9, ["floor tiles"])], "removed": True, "removal_words": ["hack"]})
+    res = web.post("/api/tag", json={"unit": "T2S", "note": "hack all the floor tiles"}).json
+    assert res["engine"] == "ai" and [t["name"] for t in res["tags"]] == ["Ground-floor tiles"], res
+    n = len(asked)
+    page = web.get("/tagger?unit=T2S").data.decode()
+    assert len(asked) == n and f"read by Claude (<code>{tagger.MODEL}</code>)" in page and "How accurate is the backup?" in page
+finally:
+    tagger._client = lambda: None
+    tagger._ask_claude.cache_clear()
+assert "pip install anthropic" in web.get("/tagger?unit=T2S").data.decode()   # AI off: the page says how to turn it on
 
 # the database: consistent, and it refuses rows that break the rules (on a copy of the data)
 import sqlite3
