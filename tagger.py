@@ -194,7 +194,7 @@ messy: English, Malay or Manglish, with typos and slang.
 
 Tag a fitting only when the note says it was removed, replaced, changed or redone, or clearly \
 implies it (redoing the whole kitchen means the cabinets and the worktop). Tag nothing when \
-the note is about something else, such as painting, grilles or curtains.
+the note is about something else, such as painting or grilles.
 
 For each tag:
 - confidence: 0 to 1, how sure you are that the note means this fitting.
