@@ -7,8 +7,10 @@ Anything that saves data runs on a temporary copy of data/, so the real files
 never change. Run it after editing impact.py, dashboard.py or the data.
 """
 
+import generate_dummy_data
 import impact
 
+generate_dummy_data.ensure_database()   # a fresh clone builds data/right_fit.db first
 data = impact.load_data()
 F = data["fittings"]
 
@@ -17,7 +19,7 @@ k = impact.impact_of(F, "T2S", "KIT-CAB", "keep")
 assert k["carbon_avoided_kg"] == 0 and k["sdp_saving_rm"] == 0
 
 # opt-out: carbon = weight x factor, SDP saving = install - credit
-# (expected values come from fittings.csv, so new figures don't break the checks)
+# (expected values come from the fittings table, so new figures don't break the checks)
 cab = impact.get_fitting(F, "T2S", "KIT-CAB")
 o = impact.impact_of(F, "T2S", "KIT-CAB", "opt_out")
 assert abs(o["carbon_avoided_kg"] - cab["weight_kg"] * cab["carbon_factor"]) < 1e-9, o
@@ -543,6 +545,54 @@ web.post("/signin", data={"who": "T2S-O001"})
 assert f"Adds to <b>{community.person('T2S-O001')['name']}</b>" in web.get("/tagger?unit=T2S").data.decode()
 web.post("/signout")
 assert "Saves as a new buyer" in web.get("/advisor?unit=T2S").data.decode()
+
+# the database: consistent, and it refuses rows that break the rules (on a copy of the data)
+import sqlite3
+import db
+con = db.connect()
+assert con.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+assert con.execute("PRAGMA foreign_key_check").fetchall() == []         # every row points at something real
+con.close()
+assert set(data["people"].person_id) == set(data["ripouts"].owner_id) | set(data["choices"].buyer_id)
+tmp = Path(tempfile.mkdtemp()); shutil.copytree(impact.DATA_DIR, tmp / "data"); D = tmp / "data"
+bad_rows = [("choices", {"buyer_id": "T2S-B001", "unit_type": "T2S", "fitting_id": "KIT-CAB", "choice": "maybe"}),
+            ("choices", {"buyer_id": "T2S-B999", "unit_type": "T2S", "fitting_id": "KIT-CAB", "choice": "keep"}),
+            ("choices", {"buyer_id": "T2S-B001", "unit_type": "T2S", "fitting_id": "KIT-CAB", "choice": "keep"}),
+            ("ripouts", {"owner_id": "T2S-O001", "unit_type": "T2S", "fitting_id": "XXX", "removed": 1}),
+            ("ripouts", {"owner_id": "T2S-O001", "unit_type": "T2S", "fitting_id": "KIT-CAB", "removed": 2}),
+            ("matches", {"listing_id": "L900", "from_owner": "T2S-O001", "unit_type": "T2S", "fitting_id": "KIT-TOP",
+                         "status": "matched", "condition": "Good", "posted_at": "2026-10-22 09:00"})]
+for table, row in bad_rows:   # a bad choice, an unknown buyer, a duplicate (T2S-B001 already chose for KIT-CAB),
+    try:                      # an unknown fitting, a removed flag of 2, a match with nobody taking it
+        with db.transaction(D) as c:
+            db.insert(c, table, row)
+        raise AssertionError(f"database accepted {table} {row}")
+    except sqlite3.IntegrityError:
+        pass
+before = len(impact.load_data(D)["messages"])
+try:                                   # a save that fails part-way leaves nothing behind
+    with db.transaction(D) as c:
+        db.insert(c, "messages", {"message_id": "M999", "post_id": "L001", "author": "T2S-B001",
+                                  "kind": "comment", "text": "half-saved", "posted_at": "2026-10-22 09:00"})
+        raise RuntimeError("something went wrong after the first insert")
+except RuntimeError:
+    pass
+assert len(impact.load_data(D)["messages"]) == before
+new_buyer = impact.save_buyer_choices("C3R", {"KIT-CAB": "opt_out"}, D)   # a new buyer becomes a person too
+p = impact.load_data(D)["people"].set_index("person_id")
+assert p.role[new_buyer] == "buyer" and p.unit_type[new_buyer] == "C3R"
+import generate_dummy_data
+real_dir, counts = generate_dummy_data.DATA, {t: len(df) for t, df in impact.load_data(D).items()}
+generate_dummy_data.DATA = D           # refreshing the fitting figures keeps every report, choice and post
+try:
+    generate_dummy_data.write_fittings(); generate_dummy_data.write_upgrades()
+finally:
+    generate_dummy_data.DATA = real_dir
+assert {t: len(df) for t, df in impact.load_data(D).items()} == counts
+out = db.export_csv(D)                 # CSV copies of every table, for Excel
+assert sorted(f.stem for f in out.glob("*.csv")) == sorted(db.TABLES)
+assert open(out / "choices.csv", encoding="utf-8").readline().strip() == "buyer_id,unit_type,fitting_id,choice,upgrade_id"
+shutil.rmtree(tmp)
 
 t = impact.dashboard_totals(data, "T2S")
 print("All checks passed.")
