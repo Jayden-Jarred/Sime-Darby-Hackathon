@@ -19,8 +19,10 @@ from flask import Flask, redirect, url_for
 from plotly.offline import get_plotlyjs
 
 from buyer import buyer_bp
+import generate_dummy_data
 from dashboard import dashboard_bp, signed_in
 
+generate_dummy_data.ensure_database()   # a fresh clone has no data/right_fit.db yet: build it
 app = Flask(__name__)
 app.register_blueprint(dashboard_bp)
 app.register_blueprint(buyer_bp)
