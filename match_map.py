@@ -6,7 +6,7 @@ The map is a simple site plan in an SVG coordinate space (1000 x 620,
 number, no two the same: a terrace slot for T2S ("No. 14, Jalan Harmoni 3"),
 a flat in one of six towers for C3R ("Tower B, #12-03"). Distances between
 two homes are measured on this map, so the drawn routes and the distance_km
-stored in matches.csv always agree. The township and its addresses are
+stored in the matches table always agree. The township and its addresses are
 fictional.
 """
 
