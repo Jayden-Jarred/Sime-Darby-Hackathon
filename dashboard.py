@@ -383,7 +383,9 @@ EXAMPLE_NOTES = [
 
 @dashboard_bp.route("/tagger")
 def tagger_page():
-    """AI tagging: type a messy renovation note, see it sorted into fittings."""
+    """AI tagging: type a messy renovation note, see it sorted into fittings.
+    The accuracy and the table are the keyword rules' (free and instant); with AI on,
+    only the note typed on the page goes to Claude."""
     unit = _unit()
     data = _data()
     ev = tagger.evaluate(data["ripouts"])
@@ -392,19 +394,20 @@ def tagger_page():
     names = _unit_names(data, unit)
     samples = []
     for note, truth in zip(recent.note, recent.fitting_id):
-        t = tagger.tag(note, fitting_ids=_unit_fitting_ids(data, unit))["tags"]
+        t = tagger.keyword_tag(note, fitting_ids=_unit_fitting_ids(data, unit))["tags"]
         samples.append({"note": note, "truth": truth, "got": t[0]["fitting_id"] if t else None,
                         "truth_name": names.get(truth, truth)})
     owner = _signed_in_as("O", unit)
     return render_template("tagger.html", unit=unit, unit_types=UNIT_TYPES, ev=ev,
                            samples=list(reversed(samples)), examples=EXAMPLE_NOTES,
                            names=names, saving_as=community.person(owner) if owner else None,
-                           reusable=sorted(_unit_fitting_ids(data, unit) - impact.NOT_REUSABLE))
+                           reusable=sorted(_unit_fitting_ids(data, unit) - impact.NOT_REUSABLE),
+                           ai_model=tagger.MODEL if tagger.ai_on() else None)
 
 
 @dashboard_bp.route("/api/tag", methods=["POST"])
 def api_tag():
-    """Body: {"note": "...", "unit": "T2S"} -> tags, highlight spans."""
+    """Body: {"note": "...", "unit": "T2S"} -> tags, highlight spans, and who read it (Claude or the keyword rules)."""
     body = _json_body()
     unit = body.get("unit", "T2S")
     if not _known_unit(unit):
