@@ -26,7 +26,9 @@ API (JSON; bad input -> 400 with an "error"):
     POST /api/match/request  {"unit", "requester", "fitting", "note"?}   asks for one
     POST /api/match/claim    {"listing_id", "requester"}         takes one offer
     POST /api/match/comment  {"post_id", "author", "text"}       a message on a post
-    POST /api/match/collect  {"listing_id", "by"?, "thanks"?}    marks it picked up
+    POST /api/match/collect  {"listing_id", "by", "thanks"?}     marks it picked up
+    (A signed-in neighbour always acts as themselves: naming anyone else -> 403.
+    With nobody signed in, the demo acts for the neighbour the page sends.)
     POST /api/reset-demo     {} (JSON)  puts the demo database back to its starting data
     GET  /export/<ripout-index|impact-by-fitting|upgrade-mix|choices>.csv?unit=T2S
     POST /signin  (form: who, next?)   POST /signout
@@ -43,13 +45,13 @@ from flask import (Blueprint, Response, abort, jsonify, make_response, redirect,
                    session, url_for)
 import plotly.graph_objects as go
 
-import generate_dummy_data
+import generate_dummy_data   # only for Reset demo data
 import community
 import impact
 import match_map
 import neighbour_match
 import tagger
-from generate_dummy_data import UNIT_TYPES
+from impact import UNIT_TYPES
 
 dashboard_bp = Blueprint("dashboard", __name__)
 
@@ -96,18 +98,35 @@ def signed_in():
 
 def _home_type(who):
     """The home type in a neighbour's id (T2S-O001 -> T2S), or None."""
-    unit = who.split("-")[0] if isinstance(who, str) else ""
+    unit = impact.parse_person(who)[0]
     return unit if unit in UNIT_TYPES else None
 
 
-def _signed_in_as(kind, unit):
+def _signed_in_as(role, unit):
     """
-    The signed-in person's id if they are a buyer (kind "B") or a homeowner ("O")
-    of this home type, else None. The Advisor saves under that buyer and AI
-    tagging under that homeowner; anyone else saves as a new buyer or owner.
+    The signed-in person's id if they are a "buyer" or an "owner" of this home
+    type, else None. The Advisor saves under that buyer and AI tagging under
+    that homeowner; anyone else saves as a new buyer or owner.
     """
     who = signed_in()
-    return who if who and _home_type(who) == unit and who.startswith(f"{unit}-{kind}") else None
+    return who if impact.parse_person(who) == (unit, role) else None
+
+
+def _acting(claimed):
+    """
+    Who a Neighbour Match step acts for. A signed-in neighbour always acts as
+    themselves, so a request naming someone else is refused (PermissionError -> 403).
+    With nobody signed in (or SDP staff looking), the demo acts for the neighbour
+    the page shows, sent in the request.
+    """
+    who = signed_in()
+    claimed = "" if claimed is None else str(claimed)
+    if who and who != SDP_STAFF:
+        if claimed and claimed != who:
+            raise PermissionError(f"You're signed in as {community.person(who)['name']}. "
+                                  "Switch neighbour at the top of the page to act as someone else.")
+        return who
+    return claimed
 
 
 @dashboard_bp.app_context_processor
@@ -115,14 +134,6 @@ def signed_in_person():
     """`signed_in` for every page's top bar: None, SDP_PERSON, or the neighbour (community.person)."""
     who = signed_in()
     return {"signed_in": SDP_PERSON if who == SDP_STAFF else (community.person(who) if who else None)}
-
-
-def advice_key(advice):
-    if advice.startswith("Stop"):
-        return "stop"
-    if advice.startswith("Offer"):
-        return "offer"
-    return "keep"
 
 
 def story(feedback):
@@ -167,6 +178,11 @@ def _app_settings(state):
         state.app.config["MAX_CONTENT_LENGTH"] = MAX_REQUEST_BYTES
     if not state.app.secret_key:
         state.app.secret_key = os.environ.get("RFH_SECRET_KEY") or os.urandom(32)
+
+
+def bad_request(e):
+    """A 400 with the error's message. str() of a KeyError wraps it in quotes, so it comes from args."""
+    return jsonify({"error": e.args[0] if e.args else str(e)}), 400
 
 
 @dashboard_bp.app_errorhandler(413)
@@ -222,7 +238,7 @@ def ripout_chart(feedback):
         x=pct,
         y=df.name,
         orientation="h",
-        marker=dict(color=[ADVICE_COLOUR[advice_key(a)] for a in df.advice], cornerradius=4),
+        marker=dict(color=[ADVICE_COLOUR[k] for k in df.advice_key], cornerradius=4),
         text=[f"{p:.0f}%" for p in pct],
         textposition="outside",
         textfont=dict(color=INK_2, size=12),
@@ -264,7 +280,7 @@ def dashboard():
     data = _data()
     feedback = impact.design_feedback(data, unit)
     house_fittings = feedback[["fitting_id", "name", "eligibility", "owners",
-                               "removed", "rate", "advice"]].to_dict("records")
+                               "removed", "rate", "advice", "advice_key"]].to_dict("records")
     for row in house_fittings:  # numpy ints -> plain ints for JSON
         row["owners"], row["removed"] = int(row["owners"]), int(row["removed"])
     return render_template(
@@ -297,8 +313,7 @@ def api_impact():
     try:
         return jsonify(impact.impact_of(data["fittings"], unit, fitting, choice, upgrade, data["upgrades"], rate))
     except (KeyError, ValueError) as e:
-        # str() of a KeyError wraps the message in quotes, so read it from args.
-        return jsonify({"error": e.args[0] if e.args else str(e)}), 400
+        return bad_request(e)
 
 
 @dashboard_bp.route("/advisor")
@@ -307,24 +322,21 @@ def advisor():
     unit = _unit()
     data = _data()
     idx = impact.ripout_index(data, unit)[["fitting_id", "owners", "removed", "rate"]]
-    f = data["fittings"]
-    rows = (f[f.unit_type == unit]
+    rows = (impact.unit_fittings(data, unit).reset_index(drop=True)
             .merge(idx, on="fitting_id", how="left")
             .sort_values("rate", ascending=False))
-    rows["advice"] = [impact.advice_for(r, e) for r, e in zip(rows.rate, rows.eligibility)]
+    rows["advice_key"], rows["advice"] = zip(*[impact.advice(r, e) for r, e in zip(rows.rate, rows.eligibility)])
     records = rows.to_dict("records")
     ups = data["upgrades"][data["upgrades"].unit_type == unit]
     for r in records:
         r["owners"], r["removed"] = int(r["owners"]), int(r["removed"])
         r["upgrades"] = ups[ups.fitting_id == r["fitting_id"]][
             ["upgrade_id", "name", "description", "image"]].to_dict("records")
-    house = [{k: r[k] for k in ("fitting_id", "name", "eligibility", "owners", "removed", "rate", "advice")}
+    house = [{k: r[k] for k in ("fitting_id", "name", "eligibility", "owners", "removed", "rate", "advice",
+                                "advice_key")}
              for r in records]
-    buyer = _signed_in_as("B", unit)   # their earlier choices are filled in, and Confirm replaces them
-    c = data["choices"]
-    saved = {fid: {"choice": ch, "upgrade_id": up}
-             for fid, ch, up in zip(c.fitting_id[c.buyer_id == buyer], c.choice[c.buyer_id == buyer],
-                                    c.upgrade_id[c.buyer_id == buyer])} if buyer else {}
+    buyer = _signed_in_as("buyer", unit)   # their earlier choices are filled in, and Confirm replaces them
+    saved = impact.saved_choices(data, buyer) if buyer else {}
     return render_template(
         "advisor.html",
         unit=unit,
@@ -351,23 +363,22 @@ def api_choices():
     if not _known_unit(unit) or not isinstance(picks, dict) or not isinstance(upgrade_picks, dict):
         return jsonify({"error": "Send a known unit, a choices object and an optional upgrades object"}), 400
     try:
-        buyer = _signed_in_as("B", unit)   # from the sign-in, never from the request body
+        buyer = _signed_in_as("buyer", unit)   # from the sign-in, never from the request body
         buyer_id = impact.save_buyer_choices(unit, picks, upgrade_picks=upgrade_picks, buyer_id=buyer)
     except (KeyError, ValueError) as e:
-        return jsonify({"error": e.args[0] if e.args else str(e)}), 400
+        return bad_request(e)
     return jsonify({"buyer_id": buyer_id, "name": community.person(buyer_id)["name"] if buyer else None,
                     "totals": impact.dashboard_totals(_data(), unit)})
 
 
 def _unit_fitting_ids(data, unit):
-    return set(data["fittings"][data["fittings"].unit_type == unit].fitting_id)
+    return set(impact.unit_fittings(data, unit).fitting_id)
 
 
 def _unit_names(data, unit):
     """fitting_id -> this home type's name for it, from the fittings table (e.g. TIL-FLR -> "Ground-floor tiles").
     The tagger keeps generic names; the pages show the data's, so every page names a fitting the same way."""
-    f = data["fittings"][data["fittings"].unit_type == unit]
-    return dict(zip(f.fitting_id, f.name))
+    return impact.unit_fittings(data, unit).name.to_dict()
 
 
 EXAMPLE_NOTES = [
@@ -397,7 +408,7 @@ def tagger_page():
         t = tagger.keyword_tag(note, fitting_ids=_unit_fitting_ids(data, unit))["tags"]
         samples.append({"note": note, "truth": truth, "got": t[0]["fitting_id"] if t else None,
                         "truth_name": names.get(truth, truth)})
-    owner = _signed_in_as("O", unit)
+    owner = _signed_in_as("owner", unit)
     return render_template("tagger.html", unit=unit, unit_types=UNIT_TYPES, ev=ev,
                            samples=list(reversed(samples)), examples=EXAMPLE_NOTES,
                            names=names, saving_as=community.person(owner) if owner else None,
@@ -429,10 +440,10 @@ def api_report():
     if not _known_unit(unit) or not isinstance(fids, list):
         return jsonify({"error": "Send a known unit and a list of fittings"}), 400
     try:
-        signed = _signed_in_as("O", unit)   # from the sign-in, never from the request body
+        signed = _signed_in_as("owner", unit)   # from the sign-in, never from the request body
         owner = impact.add_ripout_report(unit, fids, body.get("note", ""), owner_id=signed)
     except ValueError as e:
-        return jsonify({"error": str(e)}), 400
+        return bad_request(e)
     idx = impact.ripout_index(_data(), unit)
     return jsonify({"owner_id": owner, "name": community.person(owner)["name"] if signed else None,
                     "rates": {fid: round(rate * 100, 1) for fid, rate in zip(idx.fitting_id, idx.rate)}})
@@ -445,9 +456,9 @@ def match():
     data = _data()
     hints = neighbour_match.suggestions(data, unit)
     members = neighbour_match.people(data, unit)
-    you = request.args.get("as", "")   # a link or a reload after an action can show it as someone
+    you = signed_in()                   # the neighbour signed in, if they live in this home type (they act as themselves)
     if you not in members:
-        you = signed_in()               # else the neighbour signed in, if they live in this home type
+        you = request.args.get("as", "")   # else a link or a reload after an action can show it as someone
     if you not in members:              # else a sample neighbour: an owner with something someone wants
         you = hints["can_list"][0][0] if hints["can_list"] else min(members)
     items = match_map.listings(data, unit)
@@ -465,9 +476,7 @@ def match():
         "avg_km": (sum(trips) / len(trips)) if trips else 0,
         "neighbours": community.stats(data, unit)["neighbours"],
     }
-    f = data["fittings"]
-    reusable = [{"id": i, "name": n} for i, n in zip(f.fitting_id[f.unit_type == unit], f.name[f.unit_type == unit])
-                if i not in impact.NOT_REUSABLE]
+    reusable = [{"id": i, "name": n} for i, n in _unit_names(data, unit).items() if i not in impact.NOT_REUSABLE]
     neighbours = community.everyone(data, unit)
     req = data["requests"]
     return render_template(
@@ -487,19 +496,19 @@ def signin():
     """Demo sign-in: SDP staff, a homeowner or a buyer moving in. Suggests one of each per home type."""
     unit = _unit()
     data = _data()
-    names = data["fittings"].set_index(["unit_type", "fitting_id"]).name
-    req = data["requests"]
     picks = {"Homeowner": [], "Moving in": []}
     for u in UNIT_TYPES:
+        names = _unit_names(data, u)
         hints = neighbour_match.suggestions(data, u)
         if hints["can_list"]:          # an owner with something to give, someone asking for it if possible
             owner, fid = hints["can_list"][0]
             asked = " · a neighbour wants one" if fid in hints["open_asks"] else ""
-            picks["Homeowner"].append({**community.person(owner), "hint": f"Can give: {names[u, fid].lower()}{asked}"})
-        looking = req[(req.unit_type == u) & (req.status == "open") & req.requester.str.contains("-B")]
-        buyer = looking.requester.iloc[-1] if not looking.empty else min(hints["buyers"])
-        hint = (f"Choosing a fit-out · looking for: {names[u, looking.fitting_id.iloc[-1]].lower()}"
-                if not looking.empty else "Choosing a fit-out before handover")
+            picks["Homeowner"].append({**community.person(owner), "hint": f"Can give: {names[fid].lower()}{asked}"})
+        if hints["buyer_asking"]:      # a buyer already looking for something, else any buyer
+            buyer, fid = hints["buyer_asking"]
+            hint = f"Choosing a fit-out · looking for: {names[fid].lower()}"
+        else:
+            buyer, hint = min(hints["buyers"]), "Choosing a fit-out before handover"
         picks["Moving in"].append({**community.person(buyer), "hint": hint})
     everyone = {u: community.everyone(data, u) for u in UNIT_TYPES}
     return render_template("signin.html", unit=unit, unit_types=UNIT_TYPES, picks=picks, everyone=everyone,
@@ -539,11 +548,13 @@ def signout():
 
 
 def _match_call(step):
-    """Run a Neighbour Match step: its result as JSON, or a 400 with the reason."""
+    """Run a Neighbour Match step: its result as JSON, a 403 when acting for someone else, or a 400 with the reason."""
     try:
         return jsonify(step())
+    except PermissionError as e:
+        return jsonify({"error": str(e)}), 403
     except (KeyError, ValueError) as e:
-        return jsonify({"error": e.args[0] if e.args else str(e)}), 400
+        return bad_request(e)
 
 
 def _optional_id(body, key):
@@ -559,7 +570,7 @@ def api_match_list():
     """
     body = _json_body()
     return _match_call(lambda: {"listing": neighbour_match.list_item(
-        str(body.get("unit", "")), str(body.get("owner", "")), str(body.get("fitting", "")),
+        str(body.get("unit", "")), _acting(body.get("owner")), str(body.get("fitting", "")),
         condition=str(body.get("condition") or "Good"), note=body.get("note", ""),
         request_id=_optional_id(body, "request_id"))})
 
@@ -571,7 +582,7 @@ def api_match_request():
 
     def ask():
         req, listing = neighbour_match.request_item(
-            str(body.get("unit", "")), str(body.get("requester", "")), str(body.get("fitting", "")),
+            str(body.get("unit", "")), _acting(body.get("requester")), str(body.get("fitting", "")),
             note=body.get("note", ""))
         return {"request": req, "listing": listing}
     return _match_call(ask)
@@ -583,7 +594,7 @@ def api_match_claim():
     body = _json_body()
 
     def take():
-        req, listing = neighbour_match.claim(str(body.get("listing_id", "")), str(body.get("requester", "")))
+        req, listing = neighbour_match.claim(str(body.get("listing_id", "")), _acting(body.get("requester")))
         return {"request": req, "listing": listing}
     return _match_call(take)
 
@@ -593,18 +604,18 @@ def api_match_comment():
     """Body: {"post_id", "author", "text"} -> {"message": ...}."""
     body = _json_body()
     return _match_call(lambda: {"message": neighbour_match.comment(
-        str(body.get("post_id", "")), str(body.get("author", "")), body.get("text", ""))})
+        str(body.get("post_id", "")), _acting(body.get("author")), body.get("text", ""))})
 
 
 @dashboard_bp.route("/api/match/collect", methods=["POST"])
 def api_match_collect():
     """
-    Body: {"listing_id", "by"?, "thanks"?} -> {"listing": ...} with its carbon saved.
+    Body: {"listing_id", "by", "thanks"?} -> {"listing": ...} with its carbon saved.
     `by` is the giver or the neighbour taking it; that neighbour can add a thank-you note.
     """
     body = _json_body()
     return _match_call(lambda: {"listing": neighbour_match.collect(
-        str(body.get("listing_id", "")), by=_optional_id(body, "by"), thanks=body.get("thanks", ""))})
+        str(body.get("listing_id", "")), by=_acting(body.get("by")), thanks=body.get("thanks", ""))})
 
 
 @dashboard_bp.route("/api/reset-demo", methods=["POST"])
