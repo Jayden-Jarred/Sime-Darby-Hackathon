@@ -125,6 +125,7 @@ file inside. On GitHub, the message next to each file says what it is.
 | `static/vendor/` | three.js r169 + its OrbitControls and RoomEnvironment helpers, bundled so the demo runs offline | — |
 | `app.py` | The Flask app | Member 2 |
 | `templates/advisor.html` | Buyer Fit-Out Advisor screen | Member 2 |
+| `buyer.py` | The buyer screens' own API (a second Flask Blueprint): the nearest neighbour giving away each fitting a buyer opted out of | Member 2 |
 | `tagger.py` | Sorts messy notes into fittings (keyword version + honest accuracy test). Swap in an AI model by replacing `tag()` | Member 3 |
 | `templates/tagger.html` | AI tagging page | Member 3 |
 | `templates/simulate.html` | What-if simulator page (maths in `impact.simulate()`) | Member 4 |
@@ -138,6 +139,7 @@ file inside. On GitHub, the message next to each file says what it is.
 | `static/fonts/` | Fraunces (headlines) + Figtree (text), bundled for offline use, OFL licence | — |
 | `static/upgrades/` | A picture of each upgrade option (drawn illustrations, not product photos) | Member 1 |
 | `test_impact.py` | Checks for the maths, data rules, pages, API, sign-in and security fixes (`python test_impact.py`) | Member 4 |
+| `test_buyer.py` | Checks for the buyer screens: the Advisor's rip-out chart, fitting groups and totals, and the hand-off to Neighbour Match (`python test_buyer.py`) | Member 2 |
 | `docs/screenshots/` | The screenshots in this README (retake them after changing a page) | — |
 
 ## The data format (agree on this, don't rename columns)
@@ -272,6 +274,11 @@ is (left out = the first option); an unknown option returns HTTP 400. Fixed fitt
 `buyer_id` and the updated dashboard totals. Invalid choices return HTTP 400.
 
 Or call the Python directly: `impact.impact_of(fittings, "T2S", "KIT-CAB", "opt_out")`.
+
+After **Confirm**, `GET /api/buyer/nearby?unit=T2S&buyer=T2S-B101&fittings=KIT-CAB,WRD-MST`
+(`buyer.py`) gives the nearest neighbour giving away each opted-out fitting (the
+one Neighbour Match would match), and **Ask for one** posts to `/api/match/request`.
+`python test_buyer.py` checks the buyer screens.
 
 ## 3D preview
 

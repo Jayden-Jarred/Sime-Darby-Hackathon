@@ -7,7 +7,8 @@ auto-reload. Never use debug mode when other people can reach the app (for
 example with flask run --host 0.0.0.0): its error pages show the code.
 
 Every page and API route lives in dashboard.py (a Flask Blueprint plugged in
-here). "/" opens the demo sign-in screen, then the SDP dashboard (the main page)
+here), except the buyer screens' own API in buyer.py (a second Blueprint).
+"/" opens the demo sign-in screen, then the SDP dashboard (the main page)
 once someone has signed in.
 """
 
@@ -17,10 +18,12 @@ from pathlib import Path
 from flask import Flask, redirect, url_for
 from plotly.offline import get_plotlyjs
 
+from buyer import buyer_bp
 from dashboard import dashboard_bp, signed_in
 
 app = Flask(__name__)
 app.register_blueprint(dashboard_bp)
+app.register_blueprint(buyer_bp)
 
 # Save Plotly's JavaScript locally once, so the demo works with no internet.
 STATIC = Path(__file__).parent / "static"

@@ -12,3 +12,9 @@ starts with a comment saying what it shows.
 | `simulate.html` | `/simulate` | What-if: sliders that project a whole launch |
 | `tagger.html` | `/tagger` | AI tagging: sort a messy renovation note into fittings, save it as a report, and offer the removed fittings to neighbours |
 | `_topbar.html` | (every page) | The shared logo, page menu (SDP dashboard first) and who is signed in, included at the top of each page |
+
+`advisor.html` also shows the buyer's rip-out chart (one neutral colour, not SDP's
+advice), a group tag on each fitting, the "Always installed" and "Not sure yet" lists
+(`to_confirm` holds placeholders: replace them before the demo), and the sum under
+each total. After Confirm it offers each opted-out fitting from the nearest neighbour
+(`/api/buyer/nearby`, in `buyer.py`).

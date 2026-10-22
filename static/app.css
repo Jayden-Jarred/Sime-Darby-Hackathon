@@ -191,6 +191,21 @@ tr:last-child td { border-bottom: 0; }
 .method ul { margin: 0; padding-left: 18px; display: grid; gap: 6px; }
 
 /* ---- Buyer Advisor ---- */
+/* Rip-out index for buyers: the share removed, in one neutral colour (not SDP's advice colours) */
+.ripout-bars { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.ripout-bars li { display: grid; grid-template-columns: minmax(9em, 15em) minmax(0, 1fr) 10.5em; gap: 16px; align-items: center;
+                  padding: 8px 10px; border-radius: 10px; }
+.ripout-bars li:hover { background: #f5f0e6; }
+.rb-name { font-weight: 550; }
+.rb-track { height: 10px; background: #efe9dd; border-radius: 0 4px 4px 0; }
+.rb-track span { display: block; height: 100%; background: var(--ink-3); border-radius: 0 4px 4px 0; }
+.rb-value { display: flex; align-items: baseline; gap: 8px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.rb-value b { min-width: 2.6em; text-align: right; }
+.rb-value small { color: var(--ink-3); font-size: 13px; }
+@media (max-width: 520px) {   /* name and value on one line, the bar under them */
+  .ripout-bars li { grid-template-columns: minmax(0, 1fr) auto; row-gap: 6px; padding: 8px 4px; }
+  .rb-track { grid-column: 1 / -1; grid-row: 2; }
+}
 .advisor-grid { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 28px; align-items: start; }
 @media (max-width: 960px) { .advisor-grid { grid-template-columns: 1fr; } }
 .choice-list { display: grid; gap: 14px; }
@@ -198,12 +213,17 @@ tr:last-child td { border-bottom: 0; }
           box-shadow: 0 1px 2px rgba(31, 46, 36, .06); transition: box-shadow .2s; }
 .choice.is-active { box-shadow: 0 0 0 2px var(--forest-2), 0 8px 24px rgba(31, 74, 55, .12); }
 .choice legend { padding: 0; float: left; width: 100%; }
+.choice > legend { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 12px; }
 .choice h3 { font-size: 22px; margin: 0; }
+/* Which group a fitting is in: "Can opt out" / "Upgrade only" on the cards, "To be confirmed with SDP" below them */
+.group-tag { display: inline-block; padding: 3px 10px; border-radius: 999px; background: #f2ece2; color: var(--ink-2);
+             font-family: var(--text); font-size: 12.5px; font-weight: 650; white-space: nowrap; }
+.group-tag.tbc { background: transparent; box-shadow: inset 0 0 0 1.5px #cfc7b9; color: var(--ink-3); }
 .choice-head { display: flex; justify-content: space-between; gap: 16px; align-items: center; clear: both; }
 .proof { margin: 4px 0 0; font-size: 15px; color: var(--ink-2); }
 .proof b { color: var(--terra); font-weight: 700; }
 .meter { width: 120px; flex: none; height: 8px; background: #efe9dd; border-radius: 4px; overflow: hidden; }
-.meter span { display: block; height: 100%; background: var(--terra-2); border-radius: 4px; }
+.meter span { display: block; height: 100%; background: var(--ink-3); border-radius: 4px; }   /* same neutral as the rip-out chart */
 .options { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 16px; }
 .options.two { grid-template-columns: repeat(2, 1fr); }
 @media (max-width: 520px) { .options, .options.two { grid-template-columns: 1fr; } }
@@ -244,15 +264,20 @@ tr:last-child td { border-bottom: 0; }
 .saving-as { margin: 16px 0 10px; font-size: 14px; color: var(--on-forest-2); }
 .saving-as b { color: var(--on-forest); }
 .saving-as a { color: var(--terra-2); font-weight: 650; }
+/* Below the cards: what's always installed (settled, solid) and what SDP still has to confirm (dashed) */
+.fixed-box { background: var(--surface); border-radius: var(--radius); padding: 14px 18px; color: var(--ink-3); }
 .ask-sdp { border: 1.5px dashed #cfc7b9; border-radius: var(--radius); padding: 14px 18px; color: var(--ink-3); }
-.ask-sdp b { color: var(--ink-2); }
-.ask-sdp p { margin: 4px 0 0; font-size: 14.5px; }
+.fixed-box h3, .ask-sdp h3 { margin: 0; font-size: 19px; color: var(--ink); }
+.fixed-box p, .ask-sdp p { margin: 4px 0 0; font-size: 14.5px; }
+.item-list { margin: 10px 0 0; padding: 0; list-style: none; display: grid; gap: 6px; }
+.item-list li { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 4px 12px;
+                color: var(--ink-2); font-size: 15px; font-weight: 550; }
 .sum-sub { margin: 8px 0 0; font-size: 12.5px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--on-forest-2); }
 .impact-line:empty { display: none; }
 .impact-line b { color: var(--ink); }
-.included { font-size: 14.5px; color: var(--ink-2); margin: 4px 2px 0; }
 
-.summary { position: sticky; top: 16px; background: var(--forest); color: var(--on-forest); border-radius: 22px; padding: 22px; }
+.summary { position: sticky; top: 16px; background: var(--forest); color: var(--on-forest); border-radius: 22px; padding: 22px;
+           max-height: calc(100vh - 32px); overflow-y: auto; scrollbar-color: rgba(246, 241, 230, .35) transparent; }  /* scrolls once Confirm adds its result */
 .summary h2 { font-size: 24px; margin: 0; color: var(--on-forest); }
 .summary .lead { margin: 4px 0 0; color: var(--on-forest-2); font-size: 14.5px; }
 .big { font-family: var(--display); font-size: 52px; line-height: 1; font-weight: 500; margin: 18px 0 4px; color: var(--terra-2);
@@ -264,6 +289,15 @@ tr:last-child td { border-bottom: 0; }
 .sum-row { display: flex; justify-content: space-between; gap: 12px; font-size: 15px; }
 .sum-row span { color: var(--on-forest-2); }
 .sum-row b { font-variant-numeric: tabular-nums; font-weight: 650; }
+/* The sum behind each total, one line under it (filled in by the page; empty = hidden) */
+.sum-calc { margin: -6px 0 0; font-size: 13px; color: var(--on-forest-2); text-align: right; font-variant-numeric: tabular-nums; }
+.sum-calc.lead-calc { margin: 6px 0 0; text-align: left; }
+.sum-note { margin: -4px 0 0; font-size: 13px; color: var(--on-forest-2); }
+.sum-calc:empty, .sum-note:empty { display: none; }
+/* Loading: dim the totals while a choice is still being worked out */
+.summary .big, .summary .sum-row b, .sum-calc { transition: opacity .15s; }
+.summary[aria-busy="true"] .big, .summary[aria-busy="true"] .sum-row b, .summary[aria-busy="true"] .sum-calc { opacity: .5; }
+.impact-line .working-out { color: var(--ink-3); }
 .btn-primary { width: 100%; min-height: 50px; border: 0; border-radius: 12px; background: var(--terra); color: #fff;
                font: inherit; font-size: 16px; font-weight: 700; cursor: pointer; transition: background .15s; }
 .btn-primary:hover { background: #9c4526; }
@@ -274,11 +308,32 @@ tr:last-child td { border-bottom: 0; }
 .btn-link:hover { color: var(--on-forest); }
 .saved { margin-top: 14px; padding: 13px 15px; border-radius: 12px; background: var(--on-forest); color: var(--ink); font-size: 14.5px; }
 .saved a { color: var(--forest); font-weight: 700; }
+/* After Confirm: ask a neighbour for an opted-out fitting (Neighbour Match) */
+.neighbour-next { margin-top: 10px; padding: 14px 15px; border-radius: 12px; background: var(--terra-tint); color: var(--ink); font-size: 14.5px; }
+.neighbour-next h3 { margin: 0 0 4px; font-size: 19px; }
+.neighbour-next p { margin: 0 0 12px; color: var(--ink-2); }
+.neighbour-next > a { display: inline-block; padding: 10px 14px; border-radius: 10px; background: var(--forest); color: var(--on-forest);
+                      font-weight: 700; text-decoration: none; }
+.neighbour-next > a:hover { background: var(--forest-2); }
+.neighbour-next :focus-visible { outline-color: var(--forest-2); }
+/* the nearest neighbour giving each opted-out fitting away, with "Ask for one" */
+.nearby { margin: 0 0 12px; padding: 0; list-style: none; display: grid; gap: 8px; }
+.nearby li { padding: 10px 12px; border-radius: 10px; background: rgba(255, 255, 255, .65); }
+.nearby li.nearby-status { background: none; padding: 0; color: var(--ink-3); }
+.nearby li > b { display: block; }
+.nearby p { margin: 2px 0 8px; font-size: 13.5px; color: var(--ink-2); }
+.nearby .nearby-result { margin: 0; color: var(--ink); }
+.nearby .nearby-error { margin: 8px 0 0; color: #6b1d1d; }
+.nearby a { color: var(--forest); font-weight: 700; }
+.btn-ask { min-height: 36px; padding: 0 14px; border-radius: 10px; border: 1.5px solid var(--forest); background: #fff;
+           color: var(--forest); font: inherit; font-size: 14px; font-weight: 700; cursor: pointer; }
+.btn-ask:hover { background: var(--forest-tint); }
+.btn-ask:disabled { opacity: .6; cursor: progress; }
 .error { margin-top: 14px; padding: 13px 15px; border-radius: 12px; background: #fdeeee; color: #6b1d1d; font-size: 14.5px; }
 .fine-print { margin: 14px 0 0; font-size: 13px; color: var(--on-forest-2); }
 .sum-bar { display: none; }
 @media (max-width: 960px) {
-  .summary { position: static; }
+  .summary { position: static; max-height: none; overflow: visible; }
   .sum-bar { display: flex; position: fixed; left: 12px; right: 12px; bottom: 12px; z-index: 5; justify-content: space-between;
              align-items: center; gap: 12px; background: var(--forest); color: var(--on-forest); border-radius: 14px; padding: 12px 16px;
              box-shadow: 0 10px 28px rgba(0, 0, 0, .25); font-size: 15px; font-weight: 600; }
