@@ -6,6 +6,9 @@ db.py - the Right-Fit Homes database: SQLite, one file, data/right_fit.db (Membe
   read_tables(data_dir)       every table as a pandas DataFrame (impact.load_data uses this)
   transaction(data_dir)       `with transaction() as con:` saves everything, or nothing if any step fails
   insert(con, table, row)     one row from a dict; empty text is stored as NULL
+  update(con, table, values, where)    change the rows matching `where` (dicts of column -> value)
+  delete(con, table, where)   remove the rows matching `where`
+  replace(table, columns, rows, data_dir)   every row of one table, keeping the rest of the database
   ensure_person(con, ...)     add an owner or buyer the first time they save something
   export_csv(data_dir, out)   every table as a CSV, for reading in Excel: python db.py export
 
@@ -15,6 +18,7 @@ a CSV couldn't: keys (one choice per buyer per fitting), links between tables
 (a report for a fitting that exists, by an owner who exists), allowed values
 (keep / opt_out / upgrade), and consistency (a matched listing has a taker).
 Every save runs in one transaction, so a save is complete or not there at all.
+This is the only file that writes SQL: the rest of the app calls these functions.
 """
 
 import sqlite3
@@ -175,7 +179,7 @@ def create(data_dir=DATA_DIR):
     Path(data_dir).mkdir(parents=True, exist_ok=True)
     with transaction(data_dir) as con:
         for table in reversed(TABLES):
-            con.execute(f"DROP TABLE IF EXISTS {table}")
+            con.execute(f"DROP TABLE IF EXISTS {_table(table)}")
         for statement in SCHEMA.split(";"):
             if statement.strip():
                 con.execute(statement)
@@ -197,17 +201,53 @@ def _value(v):
     return v
 
 
+def _table(table):
+    """A table name from TABLES (names go into the SQL text, so only known ones are allowed)."""
+    if table not in TABLES:
+        raise ValueError(f"No table {table}")
+    return table
+
+
 def insert(con, table, row):
     """INSERT one row from a dict of column -> value."""
     cols = list(row)
-    con.execute(f"INSERT INTO {table} ({', '.join(cols)}) VALUES ({', '.join('?' * len(cols))})",
+    con.execute(f"INSERT INTO {_table(table)} ({', '.join(cols)}) VALUES ({', '.join('?' * len(cols))})",
                 [_value(row[c]) for c in cols])
 
 
 def insert_many(con, table, columns, rows):
     """INSERT many rows given as tuples in the order of `columns`."""
-    con.executemany(f"INSERT INTO {table} ({', '.join(columns)}) VALUES ({', '.join('?' * len(columns))})",
+    con.executemany(f"INSERT INTO {_table(table)} ({', '.join(columns)}) VALUES ({', '.join('?' * len(columns))})",
                     [[_value(v) for v in r] for r in rows])
+
+
+def _where(where):
+    """`col1 = ? AND col2 = ?` and its values, from a dict (never empty: no accidental whole-table change)."""
+    if not where:
+        raise ValueError("Say which rows: an empty `where` would change every row")
+    return " AND ".join(f"{c} = ?" for c in where), [_value(v) for v in where.values()]
+
+
+def update(con, table, values, where):
+    """UPDATE the rows matching `where` (column -> value) to `values` (column -> value)."""
+    table, (cond, args) = _table(table), _where(where)
+    con.execute(f"UPDATE {table} SET {', '.join(f'{c} = ?' for c in values)} WHERE {cond}",
+                [_value(v) for v in values.values()] + args)
+
+
+def delete(con, table, where):
+    """DELETE the rows matching `where` (column -> value)."""
+    table, (cond, args) = _table(table), _where(where)
+    con.execute(f"DELETE FROM {table} WHERE {cond}", args)
+
+
+def replace(table, columns, rows, data_dir=DATA_DIR):
+    """Replace every row of one table, keeping the rest of the database. Rows elsewhere that
+    point at this table are checked when the transaction ends, so the same keys can come back."""
+    with transaction(data_dir) as con:
+        con.execute("PRAGMA defer_foreign_keys = ON")
+        con.execute(f"DELETE FROM {_table(table)}")
+        insert_many(con, table, columns, rows)
 
 
 def ensure_person(con, person_id, unit_type, role):
