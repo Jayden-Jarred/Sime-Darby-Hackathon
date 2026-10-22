@@ -8,6 +8,9 @@ a flat in one of six towers for C3R ("Tower B, #12-03"). Distances between
 two homes are measured on this map, so the drawn routes and the distance_km
 stored in the matches table always agree. The township and its addresses are
 fictional.
+
+It also builds what the map draws: listings() gives every offer with its route
+and impact, and asks() gives the open requests and where the asker lives.
 """
 
 import hashlib
