@@ -15,6 +15,7 @@ starts with a comment saying what it shows.
 
 `advisor.html` also shows the buyer's rip-out chart (one neutral colour, not SDP's
 advice), a group tag on each fitting, the "Always installed" and "Not sure yet" lists
-(`to_confirm` holds placeholders: replace them before the demo), and the sum under
+(`to_confirm`: four items the team picked as likely tied to the CCC, the sales contract or
+the bank's valuation, still to confirm with SDP), and the sum under
 each total. After Confirm it offers each opted-out fitting from the nearest neighbour
 (`/api/buyer/nearby`, in `buyer.py`).
