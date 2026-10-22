@@ -85,9 +85,9 @@ fittings, with how sure the tagger is, and can be saved as a rip-out report.
 
 ```bash
 pip install flask pandas plotly
-python generate_dummy_data.py     # makes the CSV files in data/
-python test_impact.py             # checks the maths
-python app.py                     # open http://127.0.0.1:5000
+python app.py                     # open http://127.0.0.1:5000 (builds the database on the first run)
+python test_impact.py             # checks the maths, the database and every page
+python generate_dummy_data.py     # rebuilds the demo database from scratch, any time
 ```
 
 Debug mode (error pages with the code, auto-reload) is off unless you ask for
@@ -103,7 +103,7 @@ the app, for example with `flask run --host 0.0.0.0` to show it on phones.
 - `/tagger`: AI tagging. Type a messy note, see it sorted into fittings, add it as a report, then offer the removed fittings on Neighbour Match
 
 **Demo tip:** confirming choices on the Advisor, adding reports on the AI
-tagging page and running matches all save to `data/`, so the dashboard's
+tagging page and running matches all save to the database, so the dashboard's
 numbers go up. Before the real demo, press **Reset demo data** at the bottom
 of the dashboard (or run `python generate_dummy_data.py`). The data comes back
 exactly the same every time; only the Neighbour Match dates move, counting back
@@ -116,8 +116,10 @@ file inside. On GitHub, the message next to each file says what it is.
 
 | File | What it is | Owner |
 | --- | --- | --- |
-| `generate_dummy_data.py` | Makes the simulated CSV data | Member 1 |
-| `data/*.csv` | The shared data everyone reads | Member 1 |
+| `generate_dummy_data.py` | Builds the simulated demo database | Member 1 |
+| `db.py` | The database: tables and rules, transactions, CSV export (`python db.py export`) | Member 4 |
+| `data/right_fit.db` | The SQLite database every page reads. Built on each computer, not stored in git | Member 1 |
+| `docs/ARCHITECTURE.md` | How the system fits together: layers, data flow, database design, what changes for a real pilot | Member 4 |
 | `impact.py` | All cost and carbon calculations | Member 4 |
 | `dashboard.py` | Every page and API route as one Flask Blueprint, plus the demo sign-in and the request checks (other sites, size) | Member 4 |
 | `templates/dashboard.html` | Dashboard layout | Member 4 |
@@ -142,9 +144,42 @@ file inside. On GitHub, the message next to each file says what it is.
 | `test_buyer.py` | Checks for the buyer screens: the Advisor's rip-out chart, fitting groups and totals, and the hand-off to Neighbour Match (`python test_buyer.py`) | Member 2 |
 | `docs/screenshots/` | The screenshots in this README (retake them after changing a page) | — |
 
-## The data format (agree on this, don't rename columns)
+## The database (agree on this, don't rename columns)
 
-### `data/fittings.csv` — one row per fitting per unit type
+Everything is in one SQLite file, `data/right_fit.db` (SQLite comes with
+Python: nothing to install). `db.py` creates the tables; `impact.load_data()`
+reads every table as a pandas DataFrame, so the maths and pages read the same
+columns the old CSV files had. The database is not stored in git, because every
+practice run changes it: the app builds it on its first run, and
+`python generate_dummy_data.py` or **Reset demo data** rebuilds it.
+
+The database checks the rules itself, so bad data can't get in:
+
+- keys: one choice per buyer per fitting, one rip-out row per owner per fitting,
+  one offer per owner per fitting;
+- links between tables: a choice, report or post must point at a fitting and a
+  person that exist, and an upgrade must be one of that fitting's options;
+- allowed values: `keep` / `opt_out` / `upgrade`, the listing and request
+  statuses, a removed flag of 0 or 1;
+- consistency: a matched listing has a neighbour taking it, a collected one has
+  a collection time, an open request has no listing.
+
+Every save is one transaction: it is saved completely or not at all. To read
+the data in Excel, `python db.py export` writes every table to `data/export/`.
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) has the full diagram of the tables.
+
+### `unit_types` — one row per house design
+
+`unit_type, name`: `T2S` = double-storey terrace 20' x 70', `C3R` = 3-room condo.
+
+### `people` — every homeowner and new buyer
+
+`person_id, unit_type, role (owner / buyer)`. Ids look like `T2S-O001`
+(homeowner) and `T2S-B001` (buyer). Names and addresses are simulated and
+worked out from the id (`community.person()`), so they aren't stored. A real
+login would attach accounts to this table.
+
+### `fittings` — one row per fitting per unit type
 
 | Column | Meaning |
 | --- | --- |
@@ -160,14 +195,14 @@ file inside. On GitHub, the message next to each file says what it is.
 | `credit_rm` | Credit the buyer gets for opting out — **assumption**: 70% of `install_cost_rm` |
 | `upgrade_margin_rm` | SDP's margin when a buyer upgrades — **assumption**: 20% of `install_cost_rm` |
 
-### `data/upgrades.csv` — what a buyer can upgrade each fitting to
+### `upgrades` — what a buyer can upgrade each fitting to
 
 `unit_type, fitting_id, upgrade_id, name, description, margin_rm, image`
 
 One row per option, e.g. `KIT-TOP` → `QUARTZ` "Quartz top", `GRANITE`, `SINTERED`.
 `margin_rm` is SDP's margin on that option — an **assumption** (a multiple of
 the fitting's `upgrade_margin_rm`; pricier options earn more). The first option
-for a fitting is the default, and matches `upgrade_margin_rm` in `fittings.csv`
+for a fitting is the default, and matches `upgrade_margin_rm` in `fittings`
 (the What-if simulator still uses that one number). Fixed fittings have none.
 
 `image` is the option's picture on the Advisor, a path under `static/` (e.g.
@@ -175,9 +210,9 @@ for a fitting is the default, and matches `upgrade_margin_rm` in `fittings.csv`
 photo instead, put it in `static/upgrades/` and point `image` at it (in
 `generate_dummy_data.py`'s `write_upgrades()`), with permission to use the
 photo. `python -c "import generate_dummy_data as g; g.write_upgrades()"`
-rewrites just this file, without resetting the rest of the data.
+rewrites just this table, without resetting the rest of the data.
 
-### `data/ripouts.csv` — what existing owners removed (one row per owner per fitting)
+### `ripouts` — what existing owners removed (one row per owner per fitting)
 
 `owner_id, unit_type, fitting_id, removed (1/0), note`
 
@@ -185,14 +220,13 @@ rewrites just this file, without resetting the rest of the data.
 AI tagging should turn each note back into its `fitting_id`, so you can
 measure how accurate the tagger is against this column.
 
-### `data/choices.csv` — what new buyers picked in the Fit-Out Advisor
+### `choices` — what new buyers picked in the Fit-Out Advisor
 
 `buyer_id, unit_type, fitting_id, choice (keep / opt_out / upgrade), upgrade_id`
 
-`upgrade_id` is the option from `upgrades.csv` for upgrades, empty otherwise.
-Data made before this column existed won't load: run `python generate_dummy_data.py`.
+`upgrade_id` is the option from `upgrades` for upgrades, empty otherwise.
 
-### `data/matches.csv` — Neighbour Match offers ("listings")
+### `matches` — Neighbour Match offers ("listings")
 
 `listing_id, from_owner, unit_type, fitting_id, to_owner, distance_km, status, condition, note, posted_at, matched_at, collected_at`
 
@@ -203,7 +237,7 @@ number in the table and the line on the map always agree. `condition` is
 `Like new`, `Good` or `Fair`; `note` is what the owner wrote. Times are
 `YYYY-MM-DD HH:MM`, empty until that step happens.
 
-### `data/requests.csv` — Neighbour Match requests
+### `requests` — Neighbour Match requests
 
 `request_id, requester, unit_type, fitting_id, status (open / matched), listing_id, note, posted_at`
 
@@ -211,7 +245,7 @@ A neighbour asking for a fitting. `listing_id` is the listing it was matched
 to, empty while the request is `open`. "I'd like this" on an offer saves a
 request that is matched straight away, so every match has a request behind it.
 
-### `data/messages.csv` — the chat under each post
+### `messages` — the chat under each post
 
 `message_id, post_id, author, kind (comment / thanks), text, posted_at`
 
@@ -382,7 +416,7 @@ out when the app restarts).
   upgrade option, its share of that fitting's upgrades, and the margin it
   earned. Options nobody picked show as 0%, and an upgrade saved without an
   option counts as the first one. Bar colours follow the option's order in
-  `upgrades.csv` (up to four options have a colour).
+  the `upgrades` table (up to four options have a colour).
 - **Design advice:** removed by 50%+ → stop installing as standard;
   30–50% → offer as opt-out (offer as upgrade for `upgrade_only` items like
   tiles); below 30% → keep. Thresholds are in `impact.py`.
