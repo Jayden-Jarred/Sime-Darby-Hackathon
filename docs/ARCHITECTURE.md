@@ -68,7 +68,9 @@ flowchart TB
 ```
 
 Each layer only talks to the one below it. Pages never touch the database;
-the maths never knows it is a web app; only `db.py` knows the data is SQLite.
+the maths never knows it is a web app; only `db.py` opens the database and
+defines its tables (a few saves in `impact.py` and `neighbour_match.py` send
+their own SQL inside its transactions).
 That is what lets a teammate swap one part (the LLM, the login, a bigger
 database) without touching the others.
 
@@ -278,7 +280,7 @@ sequenceDiagram
 
 | Concern | How it is handled now |
 | --- | --- |
-| Who is using it | Demo sign-in in Flask's signed session cookie. `dashboard.signed_in()` is the one place that asks; saves use the signed-in person, never an id sent by the browser. |
+| Who is using it | Demo sign-in in Flask's signed session cookie. `dashboard.signed_in()` is the one place that asks; the Advisor and AI tagging save as the signed-in person, never an id sent by the browser. Neighbour Match's API still takes the person from the request, so the demo can act for any neighbour; a real login closes that. |
 | Security | POSTs from other websites refused; Reset needs JSON; request bodies over 64 KB refused; debug mode off unless `FLASK_DEBUG=1`; every user's text escaped on the pages. |
 | Data quality | Database keys, links and checks (section 4); every save in one transaction. |
 | Speed | The dashboard works out each distinct choice once (about 0.2 s per load); pages read the database fresh on each request, so edits show at once. |
@@ -294,7 +296,7 @@ functions.
 
 | Layer | Demo (now) | Pilot (suggested) |
 | --- | --- | --- |
-| Database | SQLite file on one laptop | A server database (e.g. PostgreSQL) with the same tables. Only `db.py` changes. |
+| Database | SQLite file on one laptop | A server database (e.g. PostgreSQL) with the same tables. `db.py` changes, plus the few SQL statements in `impact.py` and `neighbour_match.py`. |
 | Saving at the same time | One app process + lock + transactions | Several processes: drop the in-process lock, rely on database transactions and row locks. |
 | Login | Demo sign-in, no password | SDP's own account system replaces `signed_in()` and the `/signin` routes; accounts attach to `people`. |
 | AI tagging | Claude behind `tagger.tag()` when an API key is set, keyword rules otherwise and as the backup | The same, on SDP's own API key. Test Claude on real owners' notes (`python tagger.py --ai` with new held-out notes) before trusting it. |
