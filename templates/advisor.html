@@ -143,12 +143,16 @@
         </fieldset>
       {% endfor %}
       {#- Always installed: the fixed fittings from the data, plus services listed as text only. They aren't
-          fittings in data/fittings.csv, so they have no rip-out rate, cost or carbon. -#}
+          fittings in the database, so they have no rip-out rate, cost or carbon. -#}
       {% set always_text = ['Essential wiring', 'Essential plumbing'] %}
-      {#- PLACEHOLDER, replace before the demo: the items the team agrees need SDP's OK because they're tied to
-          the CCC, the sales contract or the bank's valuation. Hard-coded here on purpose (no data changes).
-          An empty list leaves just the explanation. -#}
-      {% set to_confirm = ['Placeholder item 1', 'Placeholder item 2'] %}
+      {#- Items that need SDP's OK because they're likely tied to the CCC, the sales contract or the bank's
+          valuation: (name, why). Picked by the team on 22 Oct as likely cases, still to confirm with SDP's
+          mentors. Hard-coded here on purpose (no data changes). An empty list leaves just the explanation. -#}
+      {% set to_confirm = [
+           ('Kitchen sink and tap', 'Part of the plumbing checked before the CCC'),
+           ('Bathroom wall tiles', "Wet areas need a waterproof finish, and they're in the sales contract"),
+           ('Doors and window frames', 'On the approved building plans the CCC checks'),
+           ('Bedroom floor finishes', "Listed in the sales contract; leaving them out may lower the bank's valuation")] %}
       <div class="not-choosable">
         <section class="fixed-box" aria-labelledby="fixed-title">
           <h3 id="fixed-title">Always installed</h3>
@@ -164,7 +168,7 @@
             before it can be left out or changed. Your sales advisor confirms these with you.</p>
           {% if to_confirm %}
           <ul class="item-list">
-            {% for name in to_confirm %}<li>{{ name }}<span class="group-tag tbc">To be confirmed with SDP</span></li>{% endfor %}
+            {% for name, why in to_confirm %}<li><div>{{ name }}<small class="tbc-why">{{ why }}</small></div><span class="group-tag tbc">To be confirmed with SDP</span></li>{% endfor %}
           </ul>
           {% endif %}
         </section>
