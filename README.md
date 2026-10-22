@@ -83,6 +83,16 @@ otherwise, and take over whenever Claude can't answer.
 
 ![AI tagging: a Malay note sorted into kitchen cabinets and kitchen top](docs/screenshots/tagger.png)
 
+## How it's built
+
+Four layers, each talking only to the one below: the pages, the Flask web
+layer, the rules and maths, and one SQLite database. Claude is optional, and
+the dashed boxes are what a real pilot would add.
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) has the data flow, the database
+tables and two requests step by step.
+
+![System architecture: who uses it, the four layers with each technology's logo, Claude optional, and what a pilot adds](docs/architecture.png)
+
 ## Run it
 
 ```bash
@@ -139,6 +149,7 @@ file inside. On GitHub, the message next to each file says what it is.
 | `db.py` | The database: tables and rules, transactions, CSV export (`python db.py export`) | Member 4 |
 | `data/right_fit.db` | The SQLite database every page reads. Built on each computer, not stored in git | Member 1 |
 | `docs/ARCHITECTURE.md` | How the system fits together: layers, data flow, database design, what changes for a real pilot | Member 4 |
+| `docs/architecture.png` | The architecture as one picture (in this README, ARCHITECTURE.md and Appendix C of the pitch deck) | Member 4 |
 | `impact.py` | All cost and carbon calculations | Member 4 |
 | `dashboard.py` | Every page and API route as one Flask Blueprint, plus the demo sign-in and the request checks (other sites, size) | Member 4 |
 | `templates/dashboard.html` | Dashboard layout | Member 4 |
