@@ -222,6 +222,7 @@
 </script>
 <script type="module">
   import { mountHouse } from "{{ url_for('static', filename='house3d.js') }}";
+  import { esc } from "{{ url_for('static', filename='esc.js') }}";
 
   const UNIT = {{ unit | tojson }};
   const cards = [...document.querySelectorAll('.choice')];
@@ -248,7 +249,6 @@
     },
   });
 
-  const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const rm = n => 'RM ' + Math.round(n).toLocaleString('en-MY');
   const kg = n => (n >= 1000 ? (n / 1000).toFixed(1) + ' t' : Math.round(n).toLocaleString('en-MY') + ' kg');
 
