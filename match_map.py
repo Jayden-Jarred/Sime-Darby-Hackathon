@@ -15,7 +15,6 @@ and impact, and asks() gives the open requests and where the asker lives.
 
 import hashlib
 import math
-import re
 
 import impact
 
@@ -50,10 +49,10 @@ def home_number(person):
     Unique while the id number is at most BUYER_OFFSET (341 for T2S); any
     other id falls back to a hash, so it still gets a home.
     """
-    m = re.fullmatch(r"[A-Z0-9]+-([OB])(\d+)", person or "")
-    if not m or not 0 < int(m[2]) <= BUYER_OFFSET:
+    m = impact.PERSON_ID.fullmatch(person or "")
+    if not m or not 0 < int(m[3]) <= BUYER_OFFSET:
         return _hash(person or "")
-    return int(m[2]) - 1 + (BUYER_OFFSET if m[1] == "B" else 0)
+    return int(m[3]) - 1 + (BUYER_OFFSET if m[2] == "B" else 0)
 
 
 def _terrace_slot(person):
@@ -87,7 +86,7 @@ def distance_km(a, b, unit_type):
 def listings(data, unit_type):
     """Every listing for this unit type, with map positions and its impact."""
     m = data["matches"][data["matches"].unit_type == unit_type]
-    f = data["fittings"][data["fittings"].unit_type == unit_type].set_index("fitting_id")
+    f = impact.unit_fittings(data, unit_type)
     out = []
     for r in m.to_dict("records"):
         fit = f.loc[r["fitting_id"]]
@@ -97,7 +96,6 @@ def listings(data, unit_type):
         dst = position(r["to_owner"], unit_type) if has_to else None
         if dst == src:   # same tower: nudge so the route is visible
             dst = (src[0] + 12, src[1])
-        saved = impact.reuse_carbon_kg(float(fit.weight_kg), float(fit.carbon_factor), km or 0)
         out.append({
             "id": r["listing_id"], "fitting_id": r["fitting_id"], "name": fit["name"],
             "from_owner": r["from_owner"], "to_owner": r["to_owner"] if has_to else None,
@@ -105,7 +103,7 @@ def listings(data, unit_type):
             "from": [round(src[0], 1), round(src[1], 1)],
             "to": [round(dst[0], 1), round(dst[1], 1)] if dst else None,
             "weight_kg": float(fit.weight_kg),
-            "carbon_saved_kg": round(saved, 1) if r["status"] == "collected" else 0.0,
+            "carbon_saved_kg": impact.rehomed_carbon_kg(fit, km) if r["status"] == "collected" else 0.0,
         })
     order = {"collected": 0, "matched": 1, "unmatched": 2}
     out.sort(key=lambda x: (order[x["status"]], x["km"] or 99))
@@ -116,7 +114,7 @@ def asks(data, unit_type):
     """Open requests (neighbours asking for a fitting), with where they live."""
     req = data["requests"]
     req = req[(req.unit_type == unit_type) & (req.status == "open")]
-    names = data["fittings"][data["fittings"].unit_type == unit_type].set_index("fitting_id").name
+    names = impact.unit_fittings(data, unit_type).name
     return [{"id": r.request_id, "requester": r.requester, "fitting_id": r.fitting_id,
              "name": names[r.fitting_id], "at": list(position(r.requester, unit_type))}
             for r in req.itertuples()]
