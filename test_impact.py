@@ -279,7 +279,7 @@ assert l["status"] == "matched" and l["to_owner"] == nearest.requester, l
 r1 = impact.load_data(D)["requests"]
 assert r1.set_index("request_id").loc[nearest.request_id, "listing_id"] == l["listing_id"]
 before = impact.reuse_summary(impact.load_data(D), "T2S")
-picked = nm.collect(l["listing_id"], D)           # picked up: now its carbon counts
+picked = nm.collect(l["listing_id"], D, by=l["to_owner"])   # picked up: now its carbon counts
 after = impact.reuse_summary(impact.load_data(D), "T2S")
 assert picked["status"] == "collected" and after["collected"] == before["collected"] + 1
 assert abs(after["carbon_saved_kg"] - before["carbon_saved_kg"] - picked["carbon_saved_kg"]) < 0.1
@@ -295,8 +295,8 @@ for refused in (lambda: nm.list_item("T2S", owner, fid, D),               # list
                 lambda: nm.list_item("T2S", owner, "TIL-FLR", D),         # tiles can't be rehomed
                 lambda: nm.list_item("T2S", "T2S-O999", "KIT-CAB", D),     # nobody by that id
                 lambda: nm.list_item("T2S", never_removed, "KIT-CAB", D),  # didn't report removing it
-                lambda: nm.collect(l["listing_id"], D),                   # already collected
-                lambda: nm.collect("L999", D)):
+                lambda: nm.collect(l["listing_id"], D, by=l["to_owner"]),  # already collected
+                lambda: nm.collect("L999", D, by=owner)):
     try:
         refused()
         raise AssertionError("should be refused")
@@ -610,6 +610,48 @@ finally:
     tagger._client = lambda: None
     tagger._ask_claude.cache_clear()
 assert "pip install anthropic" in web.get("/tagger?unit=T2S").data.decode()   # AI off: the page says how to turn it on
+
+# Neighbour Match acts as the signed-in neighbour: a request naming anyone else is refused (nothing is saved)
+d_now = impact.load_data()
+matched = d_now["matches"][(d_now["matches"].unit_type == "T2S") & (d_now["matches"].status == "matched")].iloc[0]
+web.post("/signout")
+res = web.post("/api/match/collect", json={"listing_id": matched.listing_id})     # nobody says who: refused
+assert res.status_code == 400 and "giver or the neighbour" in res.json["error"], res.json
+web.post("/signin", data={"who": "T2S-O001"})
+for url, body in (("/api/match/request", {"unit": "T2S", "requester": "T2S-B025", "fitting": "KIT-CAB"}),
+                  ("/api/match/claim", {"listing_id": "L001", "requester": "T2S-B025"}),
+                  ("/api/match/comment", {"post_id": "L001", "author": "T2S-B025", "text": "hi"}),
+                  ("/api/match/collect", {"listing_id": matched.listing_id, "by": matched.to_owner}),
+                  ("/api/match/list", {"unit": "T2S", "owner": "T2S-O002", "fitting": "KIT-CAB"})):
+    res = web.post(url, json=body)
+    assert res.status_code == 403 and "signed in as" in res.json["error"], (url, res.status_code, res.json)
+res = web.post("/api/match/list", json={"unit": "T2S", "owner": "T2S-O001", "fitting": "TIL-FLR"})
+assert res.status_code == 400 and "can't be rehomed" in res.json["error"]   # as themselves: on to the real rules
+page = web.get("/match?unit=T2S&as=T2S-O002").data.decode()                 # as= can't override who is signed in
+assert f"Signed in as <b>{community.person('T2S-O001')['name']}</b>" in page
+web.post("/signout")
+assert impact.load_data()["matches"].equals(d_now["matches"]) and impact.load_data()["requests"].equals(d_now["requests"])
+
+# the shared rules: one id parser, one advice key per fitting, and SQL only in db.py
+assert impact.parse_person("T2S-O001") == ("T2S", "owner") and impact.parse_person("C3R-B025") == ("C3R", "buyer")
+assert all(impact.parse_person(x) == (None, None) for x in ("sdp", "T2S-X001", "T2S-O", None, 42, "T2S-O001x"))
+fb = impact.design_feedback(data, "T2S")
+assert set(fb.advice_key) <= {"stop", "offer", "keep"}
+assert all(k == "stop" for k in fb.advice_key[fb.rate >= impact.STOP_THRESHOLD][fb.eligibility != "fixed"])
+assert dict(zip(fb.advice, fb.advice_key))["Stop installing as standard"] == "stop"
+import re as _re
+import db
+for src in Path(".").glob("*.py"):
+    if src.name not in ("db.py", "test_impact.py"):
+        code = src.read_text(encoding="utf-8")
+        assert not _re.search(r"\.execute(many)?\(|\b(SELECT|INSERT INTO|UPDATE \w+ SET|DELETE FROM)\b", code), src.name
+for refused in (lambda: db.update(None, "matches", {"status": "matched"}, {}),   # no `where`: would change every row
+                lambda: db.delete(None, "nope", {"a": 1})):                      # not a table
+    try:
+        refused()
+        raise AssertionError("should have been refused")
+    except ValueError:
+        pass
 
 # the database: consistent, and it refuses rows that break the rules (on a copy of the data)
 import sqlite3
