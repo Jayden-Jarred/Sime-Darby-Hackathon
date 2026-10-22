@@ -29,10 +29,7 @@ import neighbour_match
 SEED = 42
 DATA = db.DATA_DIR
 
-UNIT_TYPES = {
-    "T2S": "Double-storey terrace 20' x 70'",
-    "C3R": "3-room condominium",
-}
+UNIT_TYPES = impact.UNIT_TYPES   # the house designs; the unit_types table is written from this
 
 # ---- Where the fitting numbers come from (README.md lists these too) ---------
 # [1] ICE Database v4, Circular Ecology (2024), cradle to gate, as listed on
@@ -217,12 +214,8 @@ STAMP = "%Y-%m-%d %H:%M"
 
 
 def _replace(table, columns, rows):
-    """Replace every row of one table, keeping the rest of the database. Rows elsewhere that
-    point at this table are checked when the transaction ends, so the same keys can come back."""
-    with db.transaction(DATA) as con:
-        con.execute("PRAGMA defer_foreign_keys = ON")
-        con.execute(f"DELETE FROM {table}")
-        db.insert_many(con, table, columns, rows)
+    """Replace every row of one table (db.replace), keeping the rest of the database."""
+    db.replace(table, columns, rows, DATA)
 
 
 def write_upgrades():
