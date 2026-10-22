@@ -15,18 +15,19 @@ directly: claim() takes that offer, and list_item(request_id=...) answers
 that request. A listing's carbon counts only once it is collected
 (impact.reuse_carbon_kg, in impact.reuse_summary).
 
-Listings are data/matches.csv  (status: unmatched -> matched -> collected).
-Requests are data/requests.csv (status: open -> matched, with the listing_id).
-Messages are data/messages.csv (post_id is a listing or request id; kind
-"comment", or "thanks" when posted with collect()).
+Listings are the matches table  (status: unmatched -> matched -> collected).
+Requests are the requests table (status: open -> matched, with the listing_id).
+Messages are the messages table (post_id is a listing or request id; kind
+"comment", or "thanks" when posted with collect()). Each step is one database
+transaction (db.py): it is saved completely, or not at all.
 Tiles and toilets/basins can't be listed (impact.NOT_REUSABLE).
 """
 
 from datetime import datetime
-from pathlib import Path
 
 import pandas as pd
 
+import db
 import impact
 import match_map
 from impact import DATA_DIR
@@ -55,9 +56,9 @@ def _text(value, what, required=False):
 
 
 def people(data, unit_type):
-    """Everyone in this home type's community: owners (rip-out reports) and new buyers (Advisor choices)."""
-    r, c = data["ripouts"], data["choices"]
-    return set(r.owner_id[r.unit_type == unit_type]) | set(c.buyer_id[c.unit_type == unit_type])
+    """Everyone in this home type's community: its homeowners and new buyers (the people table)."""
+    p = data["people"]
+    return set(p.person_id[p.unit_type == unit_type])
 
 
 def _check(data, unit_type, person, fitting_id):
@@ -89,19 +90,15 @@ def _describe(listing, data):
             "carbon_saved_kg": round(saved, 1)}
 
 
-def _save(df, name, data_dir):
-    df.to_csv(Path(data_dir) / name, index=False)
-
-
-def _add_message(data, data_dir, post_id, author, kind, text, now):
-    msgs = data["messages"]
-    msg = {"message_id": impact.next_id(msgs.message_id, "M"), "post_id": post_id, "author": author,
+def _add_message(con, data, post_id, author, kind, text, now):
+    """Insert one message (inside the caller's transaction). Returns it."""
+    msg = {"message_id": impact.next_id(data["messages"].message_id, "M"), "post_id": post_id, "author": author,
            "kind": kind, "text": text, "posted_at": _stamp(now)}
-    _save(pd.concat([msgs, pd.DataFrame([msg])], ignore_index=True), "messages.csv", data_dir)
+    db.insert(con, "messages", msg)
     return msg
 
 
-@impact.locked   # each step reads, changes and saves the CSVs: one at a time
+@impact.locked   # each step reads, decides and saves: one at a time (see impact.DATA_LOCK)
 def list_item(unit_type, owner, fitting_id, data_dir=DATA_DIR, *, condition="Good", note="",
               request_id=None, now=None):
     """
@@ -130,14 +127,17 @@ def list_item(unit_type, owner, fitting_id, data_dir=DATA_DIR, *, condition="Goo
         wanted = wanted[wanted.request_id == request_id]
         if wanted.empty:
             raise ValueError(f"{request_id} isn't an open request for this fitting from a neighbour")
+    best = None
     if not wanted.empty:
         best = min(wanted.itertuples(),
                    key=lambda r: (match_map.distance_km(owner, r.requester, unit_type), r.request_id))
         listing.update(to_owner=best.requester, status="matched", matched_at=stamp,
                        distance_km=match_map.distance_km(owner, best.requester, unit_type))
-        req.loc[req.request_id == best.request_id, ["status", "listing_id"]] = ["matched", listing["listing_id"]]
-        _save(req, "requests.csv", data_dir)
-    _save(pd.concat([m, pd.DataFrame([listing])], ignore_index=True), "matches.csv", data_dir)
+    with db.transaction(data_dir) as con:   # the offer, and the request it answers, together
+        db.insert(con, "matches", listing)
+        if best is not None:
+            con.execute("UPDATE requests SET status = 'matched', listing_id = ? WHERE request_id = ?",
+                        (listing["listing_id"], best.request_id))
     return _describe(listing, data)
 
 
@@ -159,23 +159,24 @@ def request_item(unit_type, requester, fitting_id, data_dir=DATA_DIR, *, note=""
     waiting = m[(m.unit_type == unit_type) & (m.fitting_id == fitting_id)
                 & (m.status == "unmatched") & (m.from_owner != requester)]
     listing = None
-    if not waiting.empty:
-        best = min(waiting.itertuples(),
-                   key=lambda r: (match_map.distance_km(r.from_owner, requester, unit_type), r.listing_id))
-        listing = _match(m, best.listing_id, requester, stamp, data_dir, data)
-        request.update(status="matched", listing_id=best.listing_id)
-    _save(pd.concat([req, pd.DataFrame([request])], ignore_index=True), "requests.csv", data_dir)
+    with db.transaction(data_dir) as con:   # the request, and the offer it takes, together
+        if not waiting.empty:
+            best = min(waiting.itertuples(),
+                       key=lambda r: (match_map.distance_km(r.from_owner, requester, unit_type), r.listing_id))
+            listing = _match(con, m, best.listing_id, requester, stamp, data)
+            request.update(status="matched", listing_id=best.listing_id)
+        db.insert(con, "requests", request)
     return request, listing
 
 
-def _match(m, listing_id, requester, stamp, data_dir, data):
-    """Give waiting listing `listing_id` to `requester`; saves matches.csv and returns the listing."""
-    row = m[m.listing_id == listing_id].iloc[0]
-    km = match_map.distance_km(row.from_owner, requester, row.unit_type)
-    m.loc[m.listing_id == listing_id, ["to_owner", "distance_km", "status", "matched_at"]] = \
-        [requester, km, "matched", stamp]
-    _save(m, "matches.csv", data_dir)
-    return _describe(m[m.listing_id == listing_id].iloc[0].to_dict(), data)
+def _match(con, m, listing_id, requester, stamp, data):
+    """Give waiting listing `listing_id` to `requester` (inside the caller's transaction). Returns the listing."""
+    row = m[m.listing_id == listing_id].iloc[0].to_dict()
+    km = match_map.distance_km(row["from_owner"], requester, row["unit_type"])
+    con.execute("UPDATE matches SET to_owner = ?, distance_km = ?, status = 'matched', matched_at = ? "
+                "WHERE listing_id = ?", (requester, km, stamp, listing_id))
+    row.update(to_owner=requester, distance_km=km, status="matched", matched_at=stamp)
+    return _describe(row, data)
 
 
 @impact.locked
@@ -196,11 +197,12 @@ def claim(listing_id, requester, data_dir=DATA_DIR, *, now=None):
     if row.status != "unmatched":
         raise ValueError(f"Listing {listing_id} is already {row.status}: it's going to another neighbour")
     stamp = _stamp(now)
-    listing = _match(m, listing_id, requester, stamp, data_dir, data)
     request = {"request_id": impact.next_id(req.request_id, "R"), "requester": requester, "unit_type": row.unit_type,
                "fitting_id": row.fitting_id, "status": "matched", "listing_id": listing_id, "note": "",
                "posted_at": stamp}
-    _save(pd.concat([req, pd.DataFrame([request])], ignore_index=True), "requests.csv", data_dir)
+    with db.transaction(data_dir) as con:   # the match and the request behind it, together
+        listing = _match(con, m, listing_id, requester, stamp, data)
+        db.insert(con, "requests", request)
     return request, listing
 
 
@@ -220,7 +222,9 @@ def comment(post_id, author, text, data_dir=DATA_DIR, *, now=None):
     unit_type = _post_unit(data, post_id)
     if author not in people(data, unit_type):
         raise ValueError(f"No owner or buyer {author} in {unit_type} homes")
-    return _add_message(data, data_dir, post_id, author, "comment", _text(text, "message", required=True), now)
+    text = _text(text, "message", required=True)
+    with db.transaction(data_dir) as con:
+        return _add_message(con, data, post_id, author, "comment", text, now)
 
 
 @impact.locked
@@ -244,11 +248,12 @@ def collect(listing_id, data_dir=DATA_DIR, *, by=None, thanks="", now=None):
     if thanks and by != row.to_owner:
         raise ValueError("Only the neighbour who took it can leave a thank-you note")
     stamp = _stamp(now)
-    m.loc[m.listing_id == listing_id, ["status", "collected_at"]] = ["collected", stamp]
-    _save(m, "matches.csv", data_dir)
-    if thanks:
-        _add_message(data, data_dir, listing_id, by, "thanks", thanks, stamp)
-    return _describe(m[m.listing_id == listing_id].iloc[0].to_dict(), data)
+    with db.transaction(data_dir) as con:   # collected, and the thank-you, together
+        con.execute("UPDATE matches SET status = 'collected', collected_at = ? WHERE listing_id = ?",
+                    (stamp, listing_id))
+        if thanks:
+            _add_message(con, data, listing_id, by, "thanks", thanks, stamp)
+    return _describe(dict(row.to_dict(), status="collected", collected_at=stamp), data)
 
 
 def suggestions(data, unit_type):
