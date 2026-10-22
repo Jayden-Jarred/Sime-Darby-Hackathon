@@ -78,6 +78,8 @@ avoided, carbon, SDP's gain after its running cost, and when it pays for itself.
 
 **6. AI tagging** (`/tagger`). A messy note in Malay and English is sorted into
 fittings, with how sure the tagger is, and can be saved as a rip-out report.
+Claude reads the note when an API key is set; offline keyword rules read it
+otherwise, and take over whenever Claude can't answer.
 
 ![AI tagging: a Malay note sorted into kitchen cabinets and kitchen top](docs/screenshots/tagger.png)
 
@@ -89,6 +91,23 @@ python app.py                     # open http://127.0.0.1:5000 (builds the datab
 python test_impact.py             # checks the maths, the database and every page
 python generate_dummy_data.py     # rebuilds the demo database from scratch, any time
 ```
+
+AI tagging uses Claude when it can, and the offline keyword rules otherwise.
+To turn Claude on (optional; everything else works without it):
+
+```bash
+pip install anthropic
+export ANTHROPIC_API_KEY=sk-ant-...   # Windows PowerShell: $env:ANTHROPIC_API_KEY = "sk-ant-..."
+python app.py                         # the AI tagging page now says "Read by Claude"
+python tagger.py --ai                 # Claude's accuracy on the 25 test notes (25 API calls)
+```
+
+`TAGGER_MODEL` picks the model (default `claude-opus-5-5`; `claude-haiku-5-5`
+is cheaper and faster). Only the note typed on the AI tagging page goes to
+Claude, and each different note is asked once. If Claude can't be reached, is
+too slow (15 s), declines, or sends an answer that can't be read, the keyword
+rules tag the note and the page says why. The tests never call Claude: they
+use a stand-in.
 
 Debug mode (error pages with the code, auto-reload) is off unless you ask for
 it: `FLASK_DEBUG=1 python app.py`. Never turn it on when other people can reach
@@ -128,7 +147,7 @@ file inside. On GitHub, the message next to each file says what it is.
 | `app.py` | The Flask app | Member 2 |
 | `templates/advisor.html` | Buyer Fit-Out Advisor screen | Member 2 |
 | `buyer.py` | The buyer screens' own API (a second Flask Blueprint): the nearest neighbour giving away each fitting a buyer opted out of | Member 2 |
-| `tagger.py` | Sorts messy notes into fittings (keyword version + honest accuracy test). Swap in an AI model by replacing `tag()` | Member 3 |
+| `tagger.py` | Sorts messy notes into fittings: Claude through the Anthropic API when a key is set, keyword rules otherwise (and as the backup), plus the honest accuracy test | Member 3 |
 | `templates/tagger.html` | AI tagging page | Member 3 |
 | `templates/simulate.html` | What-if simulator page (maths in `impact.simulate()`) | Member 4 |
 | `neighbour_match.py` | Neighbour Match actions: offer, ask, instant nearest match, claim an offer, answer a request, message, collect with a thank-you | Member 3 |
@@ -498,7 +517,7 @@ python -c "import generate_dummy_data as g; g.write_fittings(); g.write_upgrades
 
 | Route | What it does |
 | --- | --- |
-| `POST /api/tag` `{"note", "unit"}` | Tags one note: fittings found, confidence, words to highlight |
+| `POST /api/tag` `{"note", "unit"}` | Tags one note: fittings found, confidence, words to highlight, and `engine` (`ai` or `keywords`; `ai_error` says why Claude didn't answer) |
 | `POST /api/report` `{"unit", "note", "fittings": [...]}` | Saves a tagged note as a new rip-out report (updates the rip-out index) |
 | `GET /api/simulate?unit=T2S&homes=500&uptake=0.8&upgrade_share=0.4&credit_mult=1&match_rate=0.5&programme_cost=80000` | One launch projection |
 | `POST /api/match/list` `{"unit", "owner", "fitting", "condition"?, "note"?, "request_id"?}` | An owner offers a removed fitting. Returns `{"listing"}`: matched to the nearest open request (or to `request_id`, answering that post), or `unmatched` |
@@ -522,6 +541,10 @@ Check the tagger's accuracy any time with `python tagger.py`. The honest number 
 **held-out** one: `HELD_OUT` notes the word lists were never tuned to. Notes the
 rules were adjusted to pass live in `TUNING_NOTES` and don't count. If you change
 the rules to fix a held-out miss, move that note to `TUNING_NOTES`.
+`python tagger.py --ai` tests Claude on both sets. Its instructions (`SYSTEM`
+and `HINTS` in `tagger.py`) were written without any held-out words, so keep
+it that way. The AI tagging page shows the keyword rules' numbers, because
+testing Claude on every page load would cost an API call per note.
 
 A note that says "wardrobe" without the room gives one tag per wardrobe, all
 with the same `pick_one` value. They're alternatives for **one** item, so the
