@@ -29,9 +29,7 @@ data/right_fit.db-journal
 # CSV copies from `python db.py export`
 data/export/
 
-# Local tool state
-.impeccable/
-.claude/
+# Local editor state
 .vscode/
 .idea/
 .DS_Store
