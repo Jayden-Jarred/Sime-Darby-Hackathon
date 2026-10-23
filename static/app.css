@@ -135,13 +135,41 @@ h1, h2, h3 { font-family: var(--display); font-weight: 560; letter-spacing: -0.0
 .house.no-webgl .house-fallback { display: grid; }
 .house:not(.is-ready) .house-legend, .house:not(.is-ready) .house-help { visibility: hidden; }
 
+/* Advisor: while the buyer scrolls through the choices, the 3D home docks above them
+   (fixed, over the choice column; the page script sets its left, width and --dock-h). */
+.house-slot { display: none; }
+.house.docked { position: fixed; top: 12px; z-index: 20; height: var(--dock-h, 300px); border-radius: 18px;
+                box-shadow: 0 16px 36px rgba(31, 46, 36, .24), 0 1px 3px rgba(31, 46, 36, .12);
+                animation: dock-in .22s ease-out; }
+@keyframes dock-in { from { opacity: 0; transform: translateY(-10px); } }
+.house.docked .house-card { left: 12px; bottom: 12px; width: auto; padding: 8px; display: flex; flex-wrap: wrap;
+                            align-items: center; gap: 8px; border-radius: 14px; }
+.house.docked .house-card > .eyebrow, .house.docked .house-card > h2,
+.house.docked .house-card > .facts, .house.docked .house-card > .view-hint, .house.docked .house-help { display: none; }
+.house.docked .floor-pick { margin: 0; }
+.house.docked .floor-label { display: none; }
+.house.docked .seg button { min-height: 34px; padding: 5px 12px; font-size: 14px; }
+.house.docked .house-legend { top: 12px; left: 12px; right: auto; bottom: auto; justify-content: flex-start; max-width: 60%; }
+.dock-close { display: none; }
+.house.docked .dock-close { display: grid; place-items: center; position: absolute; top: 10px; right: 10px; z-index: 4;
+                            width: 36px; height: 36px; border: 0; border-radius: 50%; cursor: pointer; font: inherit;
+                            font-size: 20px; line-height: 1; color: var(--ink); background: rgba(255, 253, 248, .94);
+                            box-shadow: 0 2px 8px rgba(31, 46, 36, .14); }
+.choice { scroll-margin-top: calc(var(--dock-h, 0px) + 28px); }   /* a card the model jumps to clears the dock */
+@media (max-width: 640px) {   /* phones: just the model, so the cards keep most of the screen */
+  .house.docked { top: 8px; border-radius: 14px; }
+  .house.docked .house-card, .house.docked .house-legend { display: none; }
+}
+@media (prefers-reduced-motion: reduce) { .house.docked { animation: none; } }
+
 /* ---- Results band (dark) ---- */
 .results { margin-top: 22px; background: var(--forest); color: var(--on-forest); border-radius: 24px; padding: 28px 30px 24px; }
 .results-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 18px; }
 .results-head h2 { margin: 0; font-size: 24px; color: var(--on-forest); }
 .results-head p { margin: 0; font-size: 14px; color: var(--on-forest-2); }
+.results-head .map-jump, .kpi .note a { color: var(--terra-2); font-weight: 700; }
 .kpis { display: grid; grid-template-columns: 1.5fr repeat(4, 1fr); gap: 0; }
-@media (max-width: 980px) { .kpis { grid-template-columns: repeat(2, 1fr); row-gap: 20px; } .kpi.lead-kpi { grid-column: 1 / -1; } }
+@media (max-width: 980px) { .kpis { grid-template-columns: repeat(2, 1fr); row-gap: 20px; column-gap: 20px; } .kpi.lead-kpi { grid-column: 1 / -1; } }
 .kpi { padding: 4px 22px; border-left: 1px solid rgba(246, 241, 230, .16); }
 .kpi:first-child { border-left: 0; padding-left: 0; }
 @media (max-width: 980px) { .kpi { border-left: 0; padding: 0; } }
@@ -435,7 +463,7 @@ label.tag-card { cursor: pointer; }
 .sim-results .kpi:first-child { padding-left: 0; }
 .sim-results .kpi .value { font-size: clamp(22px, 2.1vw, 30px); }
 @media (max-width: 600px) { .sim-results .kpi .value { font-size: 26px; white-space: normal; } }
-@media (max-width: 1100px) { .kpis.four { grid-template-columns: repeat(2, 1fr); row-gap: 18px; } .kpis.four .kpi { border-left: 0; padding-left: 0; } }
+@media (max-width: 1100px) { .kpis.four { grid-template-columns: repeat(2, 1fr); row-gap: 18px; column-gap: 20px; } .kpis.four .kpi { border-left: 0; padding-left: 0; } }
 .kpi .value.neg { color: #f0a58c; }
 .waste h3 { font-size: 19px; margin: 0 0 4px; }
 .waste .lead { margin: 0 0 16px; color: var(--ink-3); font-size: 14.5px; }
