@@ -1,0 +1,7 @@
+# Right-Fit Homes: pip install -r requirements.txt, then python app.py
+flask>=3.1
+pandas>=3.0
+plotly>=6.0
+# Optional: Claude reads the notes on the AI tagging page only when ANTHROPIC_API_KEY is set.
+# Without a key the offline keyword rules tag them, and everything else works the same.
+anthropic>=2.1

@@ -95,9 +95,18 @@ otherwise, and take over whenever Claude can't answer.
 
 ## Run it
 
+**Run it in 2 minutes** (Python 3.11 or newer). No API key needed:
+
 ```bash
-pip install flask pandas plotly
-python app.py                     # open http://127.0.0.1:5000 (builds the database on the first run)
+pip install -r requirements.txt
+python app.py
+```
+
+Then open the address it prints (`http://127.0.0.1:5000`). The first run builds
+the demo database. Without an API key, AI tagging falls back to the offline
+keyword rules; set `ANTHROPIC_API_KEY` to have Claude tag the notes (below).
+
+```bash
 python test_impact.py             # checks the maths, the database and every page
 python generate_dummy_data.py     # rebuilds the demo database from scratch, any time
 ```
@@ -106,7 +115,6 @@ AI tagging uses Claude when it can, and the offline keyword rules otherwise.
 To turn Claude on (optional; everything else works without it):
 
 ```bash
-pip install anthropic
 export ANTHROPIC_API_KEY=sk-ant-...   # Windows PowerShell: $env:ANTHROPIC_API_KEY = "sk-ant-..."
 python app.py                         # the AI tagging page now says "Read by Claude"
 python tagger.py --ai                 # Claude's accuracy on the 25 test notes (25 API calls)
