@@ -367,7 +367,7 @@ def saved_choices(data, buyer_id):
 # toilets and basins aren't offered for hygiene reasons).
 NOT_REUSABLE = {"TIL-FLR", "SAN-BTH"}
 AVG_TRIP_KM = 2.0          # assumption: average Neighbour Match delivery, one way
-SIM_DEFAULTS = {"homes": 500, "uptake": 0.8, "upgrade_share": 0.4,
+SIM_DEFAULTS = {"homes": 100, "uptake": 0.8, "upgrade_share": 0.4,
                 "credit_mult": 1.0, "match_rate": 0.5, "programme_cost": 80000}
 
 
