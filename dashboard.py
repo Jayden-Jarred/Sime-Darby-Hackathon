@@ -516,8 +516,11 @@ def signin():
 
 
 def _safe_next(target):
-    """Only a page of this app ("/match?unit=T2S"), never another site ("//evil.example", "https://...")."""
-    return isinstance(target, str) and target.startswith("/") and not target.startswith("//") and "\\" not in target
+    """Only a page of this app ("/match?unit=T2S"), never another site ("//evil.example", "https://...").
+    No whitespace or control characters either: the redirect drops a tab or newline, so "/", a tab, then
+    "/evil.example" would send the browser to "//evil.example", another site."""
+    return (isinstance(target, str) and target.startswith("/") and not target.startswith("//") and "\\" not in target
+            and not any(c.isspace() or ord(c) < 32 or ord(c) == 127 for c in target))
 
 
 @dashboard_bp.route("/signin", methods=["POST"])
