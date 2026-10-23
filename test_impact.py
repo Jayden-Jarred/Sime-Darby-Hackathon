@@ -433,7 +433,8 @@ assert "Signed in as" in page and f'value="{owner}" selected' in page and "3-roo
 assert web.post("/signin", data={"who": "T2S-B003"}).headers["Location"].endswith("/advisor?unit=T2S")  # buyer
 for bad in ("nobody", "T2S-O999", "", "XYZ-O001"):                    # only real people (or SDP staff)
     assert web.post("/signin", data={"who": bad}).status_code == 400, bad
-for target in ("https://evil.example", "//evil.example", "/\\evil.example"):   # never off to another site
+for target in ("https://evil.example", "//evil.example", "/\\evil.example",   # never off to another site
+               "/\t/evil.example", "/\n/evil.example", "/ /evil.example"):   # (a tab or newline is dropped: "//evil")
     res = web.post("/signin", data={"who": "sdp", "next": target})
     assert res.headers["Location"].endswith("/dashboard"), (target, res.headers["Location"])
 assert web.post("/signin", data={"who": "sdp", "next": "/match?unit=T2S"}).headers["Location"].endswith("/match?unit=T2S")
@@ -631,6 +632,17 @@ page = web.get("/match?unit=T2S&as=T2S-O002").data.decode()                 # as
 assert f"Signed in as <b>{community.person('T2S-O001')['name']}</b>" in page
 web.post("/signout")
 assert impact.load_data()["matches"].equals(d_now["matches"]) and impact.load_data()["requests"].equals(d_now["requests"])
+
+# the What-if opens on the 100-home pilot the deck and proposal quote, with the same numbers
+pilot = impact.simulate(data, "T2S")["totals"]
+assert impact.SIM_DEFAULTS["homes"] == 100 == pilot["homes"]
+assert round(pilot["waste_avoided_share"] * 100) == 84 and round(pilot["carbon_total_kg"] / 100) / 10 == 46.6
+assert round(pilot["sdp_net_rm"]) == 148199 and pilot["payback_homes"] == 36 and round(pilot["buyer_saving_rm"]) == 411590
+assert 'id="homes" name="homes" min="10" max="2000" step="10" value="100"' in web.get("/simulate?unit=T2S").data.decode()
+page = web.get("/advisor?unit=T2S").data.decode()
+assert 'class="dock-close"' in page and "house-slot" in page   # the 3D home docks above the choices
+page = web.get("/match?unit=T2S").data.decode()
+assert 'href="#map-title"' in page and 'id="map-title"' in page   # a link from the numbers to the map
 
 # the shared rules: one id parser, one advice key per fitting, and SQL only in db.py
 assert impact.parse_person("T2S-O001") == ("T2S", "owner") and impact.parse_person("C3R-B025") == ("C3R", "buyer")
