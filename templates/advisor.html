@@ -44,6 +44,7 @@
          aria-label="3D model of a {{ unit_info.title }}. Fittings you opt out of fade away; upgrades show the finish you picked."></div>
     <div class="house-fallback">The 3D preview needs WebGL, which this browser has turned off. Your choices below still work.</div>
     <div class="house-help">Drag to rotate · scroll to zoom</div>
+    <button type="button" class="dock-close" aria-label="Hide the 3D view">×</button>
     <div class="house-card">
       <div class="eyebrow">Your new home</div>
       <h2>{{ unit_info.title }}</h2>
@@ -248,6 +249,39 @@
       card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     },
   });
+
+  // While the buyer scrolls through the choices, the 3D home docks above them, so every
+  // opt-out or upgrade shows on the model straight away. It goes back to its place at the
+  // top when they scroll up (or press ×, until they next scroll back to the top).
+  const house = document.getElementById('house');
+  const list = document.querySelector('.choice-list');
+  const slot = document.createElement('div');   // holds the model's place in the page while it is docked
+  slot.className = 'house-slot';
+  house.after(slot);
+  let docked = false, dockOff = false, queued = false;
+  const dockHeight = () => Math.round(Math.min(320, Math.max(180, innerHeight * (innerWidth <= 640 ? 0.26 : 0.36))));
+  function updateDock() {
+    queued = false;
+    const top = (docked ? slot : house).getBoundingClientRect();
+    const area = list.getBoundingClientRect();
+    const h = dockHeight();
+    if (top.bottom > 0) dockOff = false;   // back at the top: the dock is offered again
+    const want = !dockOff && top.bottom < 0 && area.top < h + 24 && area.bottom > h + 160;
+    if (want !== docked) {
+      docked = want;
+      slot.style.height = docked ? top.height + 'px' : '';
+      slot.style.display = docked ? 'block' : '';
+      house.classList.toggle('docked', docked);
+      if (!docked) house.style.left = house.style.width = '';
+    }
+    document.documentElement.style.setProperty('--dock-h', docked ? h + 'px' : '0px');
+    if (docked) { house.style.left = area.left + 'px'; house.style.width = area.width + 'px'; }
+  }
+  const queueDock = () => { if (!queued) { queued = true; requestAnimationFrame(updateDock); } };
+  addEventListener('scroll', queueDock, { passive: true });
+  addEventListener('resize', queueDock);
+  house.querySelector('.dock-close').addEventListener('click', () => { dockOff = true; updateDock(); });
+  updateDock();
 
   const rm = n => 'RM ' + Math.round(n).toLocaleString('en-MY');
   const kg = n => (n >= 1000 ? (n / 1000).toFixed(1) + ' t' : Math.round(n).toLocaleString('en-MY') + ' kg');
