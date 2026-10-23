@@ -87,7 +87,8 @@
       <div class="kpi lead-kpi">
         <div class="label">Carbon never released</div>
         <div class="value">{{ kg(totals.carbon_avoided_kg) }} <small>CO₂e</small></div>
-        <div class="note">From buyer choices and reused fittings, after delivery trips</div>
+        <div class="note">From buyer choices and reused fittings, after delivery trips. Only fittings
+          {{ '{:.0f}'.format(offer * 100) }}%+ of owners remove count (<a href="#method-title">why</a>)</div>
       </div>
       <div class="kpi">
         <div class="label">Kept out of skips</div>
@@ -106,9 +107,10 @@
       </div>
       <div class="kpi">
         <div class="label">Rehomed next door</div>
-        <div class="value">{{ '{:.0f}'.format(totals.reuse.reuse_rate * 100) }}<small>%</small></div>
-        <div class="note">{{ totals.reuse.collected }} of the {{ totals.reuse.removed }} reusable fittings owners removed went to a
-          neighbour · {{ totals.reuse.listed }} offered on Neighbour Match so far</div>
+        <div class="value">{{ totals.reuse.collected }} <small>fittings</small></div>
+        <div class="note">{{ kg_text(totals.reuse.carbon_saved_kg) }} CO₂e saved after delivery trips ·
+          {{ totals.reuse.collected }} of the {{ totals.reuse.removed }} reusable fittings owners removed
+          ({{ '{:.0f}'.format(totals.reuse.reuse_rate * 100) }}%)</div>
       </div>
     </div>
     <div class="results-foot">
@@ -246,6 +248,10 @@
       <li>Carbon (and material) only counts where at least {{ '{:.0f}'.format(offer * 100) }}% of owners remove that fitting. Below that we can't say the buyer would have ripped it out, so their choice saves money but counts no carbon.</li>
       <li>SDP's saving = installation it no longer pays for, minus the credit it gives the buyer. Upgrade income = SDP's margin on each upgrade.</li>
       <li>Reused fittings count their carbon, minus the delivery trip ({{ transport }} kg CO₂e per km, both ways).</li>
+      <li>Why the What-if shows more carbon for 100 homes than this page does for 100 buyers: the What-if projects
+        every fitting owners would rip out, floor tiles included (few owners remove them, but they are the heaviest
+        fitting), while this page counts only the choices buyers actually made, for fittings at least
+        {{ '{:.0f}'.format(offer * 100) }}% of owners remove.</li>
       <li>Advice: removed by {{ '{:.0f}'.format(stop * 100) }}% or more of owners → stop installing; {{ '{:.0f}'.format(offer * 100) }}–{{ '{:.0f}'.format(stop * 100) }}% → offer as an opt-out (or as an upgrade, for items like tiles that can't be left out); fewer → keep.</li>
     </ul>
     <p class="reset-row">
